@@ -118,7 +118,10 @@ async function fetchAcledProtests() {
     signal: AbortSignal.timeout(15_000),
   });
 
-  if (!resp.ok) throw new Error(`ACLED API error: ${resp.status}`);
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`ACLED API error: ${resp.status}${text ? `: ${text.slice(0, 200)}` : ''}`);
+  }
   const data = await resp.json();
   if (data.message || data.error) throw new Error(data.message || data.error || 'ACLED API error');
 

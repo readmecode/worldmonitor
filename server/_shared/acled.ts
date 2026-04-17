@@ -94,7 +94,10 @@ export async function fetchAcledCached(opts: FetchAcledOptions): Promise<AcledRa
       }
     }
 
-    if (!resp.ok) throw new Error(`ACLED API error: ${resp.status}`);
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`ACLED API error: ${resp.status}${text ? `: ${text.slice(0, 200)}` : ''}`);
+    }
     const data = (await resp.json()) as { data?: AcledRawEvent[]; message?: string; error?: string };
     if (data.message || data.error) throw new Error(data.message || data.error || 'ACLED API error');
 
