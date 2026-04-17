@@ -7,7 +7,7 @@
  */
 import { CHROME_UA } from './constants';
 import { cachedFetchJson } from './redis';
-import { getAcledAccessToken } from './acled-auth';
+import { getAcledAccessToken, getAcledCookieHeader } from './acled-auth';
 
 const ACLED_API_URL = 'https://acleddata.com/api/acled/read';
 const ACLED_CACHE_TTL = 900; // 15 min — matches ACLED rate-limit window
@@ -46,7 +46,9 @@ interface FetchAcledOptions {
  */
 export async function fetchAcledCached(opts: FetchAcledOptions): Promise<AcledRawEvent[]> {
   const token = await getAcledAccessToken();
-  if (!token) return [];
+  // ACLED supports cookie-based auth, but it's a fallback. If neither OAuth nor
+  // credentials exist, degrade gracefully.
+  if (!token && !(process.env.ACLED_EMAIL?.trim() && process.env.ACLED_PASSWORD?.trim())) return [];
 
   const cacheKey = `acled:shared:${opts.eventTypes}:${opts.startDate}:${opts.endDate}:${opts.country || 'all'}:${opts.limit || 500}`;
   const result = await cachedFetchJson<AcledRawEvent[]>(cacheKey, ACLED_CACHE_TTL, async () => {
@@ -59,14 +61,38 @@ export async function fetchAcledCached(opts: FetchAcledOptions): Promise<AcledRa
     });
     if (opts.country) params.set('country', opts.country);
 
-    const resp = await fetch(`${ACLED_API_URL}?${params}`, {
-      headers: {
+    const url = `${ACLED_API_URL}?${params}`;
+
+    const doFetch = async (headers: Record<string, string>) => {
+      const resp = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(ACLED_TIMEOUT_MS),
+      });
+      return resp;
+    };
+
+    // 1) Primary: OAuth bearer token
+    let resp: Response | null = null;
+    if (token) {
+      resp = await doFetch({
         Accept: 'application/json',
         Authorization: `Bearer ${token}`,
         'User-Agent': CHROME_UA,
-      },
-      signal: AbortSignal.timeout(ACLED_TIMEOUT_MS),
-    });
+      });
+    }
+
+    // 2) Fallback: cookie-based session (some accounts appear to allow cookie auth
+    //    while rejecting Bearer tokens with 403).
+    if (!resp || resp.status === 403) {
+      const cookieHeader = await getAcledCookieHeader();
+      if (cookieHeader) {
+        resp = await doFetch({
+          Accept: 'application/json',
+          Cookie: cookieHeader,
+          'User-Agent': CHROME_UA,
+        });
+      }
+    }
 
     if (!resp.ok) throw new Error(`ACLED API error: ${resp.status}`);
     const data = (await resp.json()) as { data?: AcledRawEvent[]; message?: string; error?: string };

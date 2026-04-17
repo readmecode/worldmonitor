@@ -70,6 +70,9 @@ last_outages=0
 last_climate=0
 last_cyber=0
 last_unrest=0
+last_wildfires=0
+last_air_quality=0
+last_aaii=0
 last_gdelt=0
 last_advisories=0
 last_natural=0
@@ -161,6 +164,28 @@ last_ecb="$bootstrap_now"
 
 run_seed "/app/scripts/seed-energy-intelligence.mjs"
 last_energy_intel="$bootstrap_now"
+
+# Wildfires are a dependency for thermal escalation and several cross-source signals.
+# If FIRMS key isn't set we still continue; health will show EMPTY_ON_DEMAND.
+if [ -n "${NASA_FIRMS_API_KEY:-}" ] || [ -n "${FIRMS_API_KEY:-}" ]; then
+  run_seed "/app/scripts/seed-fire-detections.mjs"
+else
+  echo "[seed-worker] SKIP: /app/scripts/seed-fire-detections.mjs (NASA_FIRMS_API_KEY not set)"
+fi
+last_wildfires="$bootstrap_now"
+
+# Air quality has two sources: OpenAQ (keyed) + optional WAQI supplement.
+if [ -n "${OPENAQ_API_KEY:-}" ] || [ -n "${WAQI_API_KEY:-}" ]; then
+  run_seed "/app/scripts/seed-health-air-quality.mjs"
+else
+  echo "[seed-worker] SKIP: /app/scripts/seed-health-air-quality.mjs (OPENAQ_API_KEY not set)"
+fi
+last_air_quality="$bootstrap_now"
+
+# AAII sentiment is a weekly dataset but cheap; keep it seeded so /api/health isn't EMPTY.
+run_seed "/app/scripts/seed-aaii-sentiment.mjs"
+last_aaii="$bootstrap_now"
+
 run_seed "/app/scripts/seed-thermal-escalation.mjs"
 last_thermal="$bootstrap_now"
 run_seed "/app/scripts/seed-vpd-tracker.mjs"
@@ -229,6 +254,24 @@ while true; do
   if [ $((now - last_unrest)) -ge 2700 ]; then
     run_seed "/app/scripts/seed-unrest-events.mjs"
     last_unrest="$now"
+  fi
+
+  if [ $((now - last_wildfires)) -ge 3600 ]; then
+    if [ -n "${NASA_FIRMS_API_KEY:-}" ] || [ -n "${FIRMS_API_KEY:-}" ]; then
+      run_seed "/app/scripts/seed-fire-detections.mjs"
+    else
+      echo "[seed-worker] SKIP: /app/scripts/seed-fire-detections.mjs (NASA_FIRMS_API_KEY not set)"
+    fi
+    last_wildfires="$now"
+  fi
+
+  if [ $((now - last_air_quality)) -ge 3600 ]; then
+    if [ -n "${OPENAQ_API_KEY:-}" ] || [ -n "${WAQI_API_KEY:-}" ]; then
+      run_seed "/app/scripts/seed-health-air-quality.mjs"
+    else
+      echo "[seed-worker] SKIP: /app/scripts/seed-health-air-quality.mjs (OPENAQ_API_KEY not set)"
+    fi
+    last_air_quality="$now"
   fi
 
   if [ $((now - last_advisories)) -ge 3600 ]; then
@@ -326,6 +369,11 @@ while true; do
   if [ $((now - last_fear_greed)) -ge 21600 ]; then
     run_seed "/app/scripts/seed-fear-greed.mjs"
     last_fear_greed="$now"
+  fi
+
+  if [ $((now - last_aaii)) -ge 86400 ]; then
+    run_seed "/app/scripts/seed-aaii-sentiment.mjs"
+    last_aaii="$now"
   fi
 
   if [ $((now - last_market_breadth)) -ge 86400 ]; then

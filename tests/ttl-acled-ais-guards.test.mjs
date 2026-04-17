@@ -67,8 +67,10 @@ describe('ACLED shared cache layer', () => {
   it('uses cachedFetchJson to check Redis cache before upstream API call', () => {
     assert.match(src, /cachedFetchJson\s*<.*>\s*\(cacheKey/,
       'Should use cachedFetchJson which handles cache check + coalescing');
-    assert.ok(src.includes('fetch(`${ACLED_API_URL}'),
-      'Should call ACLED API inside the fetcher');
+    assert.ok(
+      src.includes('ACLED_API_URL') && src.includes('fetch('),
+      'Should call ACLED API inside the fetcher',
+    );
   });
 
   it('uses 15-minute cache TTL', () => {
@@ -76,9 +78,13 @@ describe('ACLED shared cache layer', () => {
       'ACLED cache TTL should be 900s (15 minutes)');
   });
 
-  it('returns empty array when API token is missing', () => {
-    assert.match(src, /if \(!token\) return \[\]/,
-      'Should gracefully degrade when ACLED_ACCESS_TOKEN is not set');
+  it('returns empty array when API credentials are missing', () => {
+    assert.match(src, /return \[\]/,
+      'Should gracefully degrade when ACLED credentials are not set');
+    assert.match(src, /process\.env\.ACLED_EMAIL/,
+      'Should check ACLED_EMAIL when deciding whether to degrade');
+    assert.match(src, /process\.env\.ACLED_PASSWORD/,
+      'Should check ACLED_PASSWORD when deciding whether to degrade');
   });
 
   it('caches successful results via cachedFetchJson', () => {

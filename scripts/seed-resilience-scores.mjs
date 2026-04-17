@@ -166,14 +166,9 @@ async function seedResilienceScores() {
   if (missing > 0) {
     console.log(`[resilience-scores] Warming ${missing} missing via ranking endpoint...`);
     try {
-      // ?refresh=1 is ideal here, but in self-hosted deployments the refresh
-      // path may be restricted. If we don't have a key configured, fall back
-      // to a best-effort non-refresh call (it can still warm on cache-miss).
       const headers = { 'User-Agent': SEED_UA, 'Accept': 'application/json' };
       if (WM_KEY) headers['X-WorldMonitor-Key'] = WM_KEY;
-      const url = WM_KEY
-        ? `${API_BASE}/api/resilience/v1/get-resilience-ranking?refresh=1`
-        : `${API_BASE}/api/resilience/v1/get-resilience-ranking`;
+      const url = `${API_BASE}/api/resilience/v1/get-resilience-ranking?refresh=1`;
       const resp = await fetch(url, {
         headers,
         signal: AbortSignal.timeout(60_000),
