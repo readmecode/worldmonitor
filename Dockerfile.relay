@@ -7,10 +7,13 @@
 # Set AISSTREAM_API_KEY in docker-compose.yml or Railway env.
 # =============================================================================
 
-FROM node:22-alpine
+FROM node:22-bookworm-slim
 
 # curl required by OREF polling (Node.js JA3 fingerprint blocked by Akamai; curl passes)
-RUN apk add --no-cache curl
+# Debian slim reduces native-addon pain vs Alpine/musl (prebuilt binaries exist).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl ca-certificates python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -21,23 +24,13 @@ COPY scripts/package.json scripts/package-lock.json ./scripts/
 # users don't need a build toolchain.
 RUN npm ci --prefix scripts --omit=dev --omit=optional --omit=peer
 
-# Relay script and shared helpers
-COPY scripts/ais-relay.cjs ./scripts/ais-relay.cjs
-COPY scripts/_proxy-utils.cjs ./scripts/_proxy-utils.cjs
-COPY scripts/_seed-utils.mjs ./scripts/_seed-utils.mjs
-# _seed-envelope-source.mjs and _seed-contract.mjs are transitively imported
-# by _seed-utils.mjs (lines 9-10) and by seed-chokepoint-flows.mjs /
-# seed-ember-electricity.mjs directly. Missing them here = silent
-# ERR_MODULE_NOT_FOUND on every execFile invocation, which looks like a hung
-# Railway cron (the initial-seed path throws, the 6h setInterval keeps firing
-# but each child dies on import). tests/dockerfile-relay-imports.test.mjs
-# guards this COPY list against future regressions.
-COPY scripts/_seed-envelope-source.mjs ./scripts/_seed-envelope-source.mjs
-COPY scripts/_seed-contract.mjs ./scripts/_seed-contract.mjs
-COPY scripts/_country-resolver.mjs ./scripts/_country-resolver.mjs
-COPY scripts/seed-climate-news.mjs ./scripts/seed-climate-news.mjs
-COPY scripts/seed-chokepoint-flows.mjs ./scripts/seed-chokepoint-flows.mjs
-COPY scripts/seed-ember-electricity.mjs ./scripts/seed-ember-electricity.mjs
+# Copy the full scripts/ tree so the same image can run the relay and the
+# self-hosted seed-worker (which invokes many seed scripts).
+COPY scripts/ ./scripts/
+
+# Self-hosted seed worker entrypoint (used by docker-compose.yml)
+COPY docker/seed-worker.sh /app/seed-worker.sh
+RUN chmod +x /app/seed-worker.sh
 
 # Shared helper required by the relay (rss-allowed-domains.cjs)
 COPY shared/ ./shared/
