@@ -13,21 +13,28 @@ const RETRY_BASE_MS = 1000;
 const PROGRESS_INTERVAL = 5000;
 const GRACE_PERIOD_MS = 5 * 60 * 1000;
 const VALIDATION_SAMPLE_SIZE = 10;
+const CURATED_BASES_PATH = join(__dirname, 'data', 'curated-bases.json');
+const COUNTRY_CODES_PATH = join(__dirname, 'data', 'country-codes.json');
 
 function parseArgs() {
   const args = process.argv.slice(2);
   let env = 'production';
   let sha = '';
+  let skipCleanupWait = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--env' && args[i + 1]) {
       env = args[++i];
     } else if (args[i] === '--sha' && args[i + 1]) {
       sha = args[++i];
+    } else if (args[i] === '--skip-cleanup-wait') {
+      skipCleanupWait = true;
     } else if (args[i].startsWith('--env=')) {
       env = args[i].split('=')[1];
     } else if (args[i].startsWith('--sha=')) {
       sha = args[i].split('=')[1];
+    } else if (args[i].startsWith('--skip-cleanup-wait=')) {
+      skipCleanupWait = args[i].split('=')[1] === 'true';
     }
   }
 
@@ -41,7 +48,7 @@ function parseArgs() {
     sha = 'dev';
   }
 
-  return { env, sha };
+  return { env, sha, skipCleanupWait };
 }
 
 function getKeyPrefix(env, sha) {
@@ -74,6 +81,73 @@ function loadEnvFile() {
       process.env[key] = val;
     }
   }
+}
+
+function loadCountryNameToIso2Map() {
+  if (!existsSync(COUNTRY_CODES_PATH)) return new Map();
+  try {
+    const raw = JSON.parse(readFileSync(COUNTRY_CODES_PATH, 'utf8'));
+    const map = new Map();
+    for (const [iso2, meta] of Object.entries(raw)) {
+      const name = typeof meta?.name === 'string' ? meta.name.trim().toLowerCase() : '';
+      if (name) map.set(name, iso2);
+      if (Array.isArray(meta?.keywords)) {
+        for (const keyword of meta.keywords) {
+          const normalized = typeof keyword === 'string' ? keyword.trim().toLowerCase() : '';
+          if (normalized && normalized.length > 3 && !map.has(normalized)) map.set(normalized, iso2);
+        }
+      }
+    }
+    map.set('ivory coast', 'CI');
+    map.set('south korea', 'KR');
+    map.set('north korea', 'KP');
+    map.set('united kingdom', 'GB');
+    map.set('united states', 'US');
+    map.set('uae', 'AE');
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function inferBaseCategories(arm = '', description = '') {
+  const haystack = `${arm} ${description}`.toLowerCase();
+  return {
+    catAirforce: /air force|airbase|air base|airfield/.test(haystack),
+    catNaval: /navy|naval|fleet|port/.test(haystack),
+    catNuclear: /nuclear/.test(haystack),
+    catSpace: /space|satellite|launch/.test(haystack),
+    catTraining: /training|range|exercise/.test(haystack),
+  };
+}
+
+function buildCuratedFallbackEntries() {
+  if (!existsSync(CURATED_BASES_PATH)) return [];
+  const countryMap = loadCountryNameToIso2Map();
+  const raw = JSON.parse(readFileSync(CURATED_BASES_PATH, 'utf8'));
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((entry) => entry && entry.id && entry.lat != null && entry.lon != null)
+    .map((entry) => {
+      const countryName = String(entry.country || '').trim();
+      const countryIso2 = countryMap.get(countryName.toLowerCase()) || '';
+      const categories = inferBaseCategories(entry.arm, entry.description);
+      return {
+        id: String(entry.id),
+        name: String(entry.name || entry.id),
+        lat: Number(entry.lat),
+        lon: Number(entry.lon),
+        kind: 'base',
+        countryIso2,
+        type: String(entry.type || 'other'),
+        tier: 1,
+        source: 'curated',
+        branch: String(entry.arm || ''),
+        status: String(entry.status || 'active'),
+        description: String(entry.description || ''),
+        ...categories,
+      };
+    });
 }
 
 async function pipelineRequest(url, token, commands, attempt = 1) {
@@ -225,7 +299,7 @@ async function cleanupOldVersion(url, token, prefix, newVersion) {
 async function main() {
   loadEnvFile();
 
-  const { env, sha } = parseArgs();
+  const { env, sha, skipCleanupWait } = parseArgs();
   const prefix = getKeyPrefix(env, sha);
 
   const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
@@ -243,6 +317,7 @@ async function main() {
   const volumePath = '/data/military-bases-final.json';
   const localPath = join(__dirname, 'data', 'military-bases-final.json');
   let dataPath = existsSync(volumePath) ? volumePath : existsSync(localPath) ? localPath : null;
+  let entries = null;
 
   if (!dataPath) {
     const cfToken = process.env.CLOUDFLARE_R2_TOKEN || process.env.CLOUDFLARE_API_TOKEN || '';
@@ -273,6 +348,15 @@ async function main() {
   }
 
   if (!dataPath) {
+    const curatedEntries = buildCuratedFallbackEntries();
+    if (curatedEntries.length > 0) {
+      entries = curatedEntries;
+      dataPath = `${CURATED_BASES_PATH} (curated fallback)`;
+      console.log(`  Using curated fallback dataset: ${curatedEntries.length.toLocaleString()} entries`);
+    }
+  }
+
+  if (!dataPath) {
     const activeKey = `${prefix}military:bases:active`;
     const check = await pipelineRequest(redisUrl, redisToken, [['GET', activeKey]]);
     const existing = check[0]?.result;
@@ -284,8 +368,10 @@ async function main() {
     process.exit(1);
   }
 
-  const raw = readFileSync(dataPath, 'utf8');
-  const entries = JSON.parse(raw);
+  if (!entries) {
+    const raw = readFileSync(dataPath, 'utf8');
+    entries = JSON.parse(raw);
+  }
 
   if (!Array.isArray(entries) || entries.length === 0) {
     console.error('Data file is empty or not a JSON array.');
@@ -336,14 +422,18 @@ async function main() {
   await atomicSwitch(redisUrl, redisToken, prefix, version);
 
   if (oldInfo) {
-    console.log(`\nScheduling cleanup of old version ${oldInfo.oldVersion} in ${GRACE_PERIOD_MS / 1000}s...`);
-    await sleep(GRACE_PERIOD_MS);
-    console.log(`Cleaning up old keys: ${oldInfo.oldGeoKey}, ${oldInfo.oldMetaKey}`);
-    await pipelineRequest(redisUrl, redisToken, [
-      ['DEL', oldInfo.oldGeoKey],
-      ['DEL', oldInfo.oldMetaKey],
-    ]);
-    console.log('Old version cleaned up.');
+    if (skipCleanupWait) {
+      console.log(`\nSkipping delayed cleanup wait for old version ${oldInfo.oldVersion} (explicit flag set).`);
+    } else {
+      console.log(`\nScheduling cleanup of old version ${oldInfo.oldVersion} in ${GRACE_PERIOD_MS / 1000}s...`);
+      await sleep(GRACE_PERIOD_MS);
+      console.log(`Cleaning up old keys: ${oldInfo.oldGeoKey}, ${oldInfo.oldMetaKey}`);
+      await pipelineRequest(redisUrl, redisToken, [
+        ['DEL', oldInfo.oldGeoKey],
+        ['DEL', oldInfo.oldMetaKey],
+      ]);
+      console.log('Old version cleaned up.');
+    }
   }
 
   console.log('\n=== Done ===');

@@ -13,6 +13,8 @@
 services:
 
   worldmonitor:
+    env_file:
+      - .env.local
     build:
       context: .
       dockerfile: Dockerfile
@@ -21,26 +23,16 @@ services:
     ports:
       - "${WM_PORT:-3000}:8080"
     environment:
+      DEPLOYMENT_MODE: "self_hosted"
+      # Alpine + Node can prefer IPv6 first; in many home/office networks IPv6
+      # is partially broken inside containers, causing intermittent "fetch failed".
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
       UPSTASH_REDIS_REST_URL: "http://redis-rest:80"
       UPSTASH_REDIS_REST_TOKEN: "${REDIS_TOKEN:-wm-local-token}"
       LOCAL_API_PORT: "46123"
       LOCAL_API_MODE: "docker"
       LOCAL_API_CLOUD_FALLBACK: "false"
       WS_RELAY_URL: "http://ais-relay:3004"
-      # LLM provider (any OpenAI-compatible endpoint)
-      LLM_API_URL: "${LLM_API_URL:-}"
-      LLM_API_KEY: "${LLM_API_KEY:-}"
-      LLM_MODEL: "${LLM_MODEL:-}"
-      GROQ_API_KEY: "${GROQ_API_KEY:-}"
-      # Data source API keys (optional — features degrade gracefully)
-      AISSTREAM_API_KEY: "${AISSTREAM_API_KEY:-}"
-      FINNHUB_API_KEY: "${FINNHUB_API_KEY:-}"
-      EIA_API_KEY: "${EIA_API_KEY:-}"
-      FRED_API_KEY: "${FRED_API_KEY:-}"
-      ACLED_ACCESS_TOKEN: "${ACLED_ACCESS_TOKEN:-}"
-      NASA_FIRMS_API_KEY: "${NASA_FIRMS_API_KEY:-}"
-      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:-}"
-      AVIATIONSTACK_API: "${AVIATIONSTACK_API:-}"
     # Docker secrets (recommended for API keys — keeps them out of docker inspect).
     # Create secrets/ dir with one file per key, then uncomment below.
     # See SELF_HOSTING.md or docker-compose.override.yml for details.
@@ -53,20 +45,49 @@ services:
     #   - LLM_API_KEY
     depends_on:
       redis-rest:
-        condition: service_started
+        condition: service_healthy
       ais-relay:
         condition: service_started
     restart: unless-stopped
 
   ais-relay:
+    env_file:
+      - .env.local
     build:
       context: .
       dockerfile: Dockerfile.relay
     image: worldmonitor-ais-relay:latest
     container_name: worldmonitor-ais-relay
     environment:
-      AISSTREAM_API_KEY: "${AISSTREAM_API_KEY:-}"
+      DEPLOYMENT_MODE: "self_hosted"
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
       PORT: "3004"
+      UPSTASH_REDIS_REST_URL: "http://redis-rest:80"
+      UPSTASH_REDIS_REST_TOKEN: "${REDIS_TOKEN:-wm-local-token}"
+    depends_on:
+      redis-rest:
+        condition: service_healthy
+    restart: unless-stopped
+
+  seed-worker:
+    env_file:
+      - .env.local
+    build:
+      context: .
+      dockerfile: Dockerfile.relay
+    image: worldmonitor-ais-relay:latest
+    container_name: worldmonitor-seed-worker
+    command: ["/app/seed-worker.sh"]
+    environment:
+      DEPLOYMENT_MODE: "self_hosted"
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
+      UPSTASH_REDIS_REST_URL: "http://redis-rest:80"
+      UPSTASH_REDIS_REST_TOKEN: "${REDIS_TOKEN:-wm-local-token}"
+    depends_on:
+      redis-rest:
+        condition: service_healthy
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   redis:
@@ -78,6 +99,8 @@ services:
     restart: unless-stopped
 
   redis-rest:
+    env_file:
+      - .env.local
     build:
       context: docker
       dockerfile: Dockerfile.redis-rest
@@ -90,6 +113,13 @@ services:
       SRH_CONNECTION_STRING: "redis://redis:6379"
     depends_on:
       - redis
+    healthcheck:
+      # Use $$ to avoid docker-compose interpolating $SRH_TOKEN on the host.
+      # redis-rest image doesn't ship curl by default; use wget (present on alpine).
+      test: ["CMD-SHELL", "wget -qO- --timeout=2 --header=\"Authorization: Bearer $$SRH_TOKEN\" --header=\"Content-Type: application/json\" --post-data='[\"PING\"]' http://127.0.0.1:80/ >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
 # Docker secrets — uncomment and point to your secret files.

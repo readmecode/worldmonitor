@@ -36,7 +36,9 @@ const ADVISORY_FEEDS = [
   { name: 'WHO Africa Emergencies', sourceCountry: 'INT', url: 'https://www.afro.who.int/rss/emergencies.xml' },
 ];
 
-const RELAY_URL = process.env.RELAY_URL || 'https://proxy.worldmonitor.app';
+const RELAY_URL = process.env.RELAY_URL
+  || process.env.RSS_PROXY_BASE_URL
+  || (process.env.DEPLOYMENT_MODE === 'self_hosted' ? 'http://ais-relay:3004' : 'https://proxy.worldmonitor.app');
 
 function parseUsLevel(title) {
   const m = title.match(/Level (\d)/i);

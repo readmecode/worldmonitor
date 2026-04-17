@@ -24,7 +24,7 @@ import type {
   RegionalNarrative,
   NarrativeSection,
 } from '../../../../src/generated/server/worldmonitor/intelligence/v1/service_server';
-import { getCachedJson } from '../../../_shared/redis';
+import { getCachedJson, getCachedString } from '../../../_shared/redis';
 
 const LATEST_KEY_PREFIX = 'intelligence:snapshot:v1:';
 const BY_ID_KEY_PREFIX = 'intelligence:snapshot-by-id:v1:';
@@ -487,15 +487,12 @@ export const getRegionalSnapshot: IntelligenceServiceHandler['getRegionalSnapsho
 
   // Step 1: resolve latest pointer -> snapshot_id
   const latestKey = `${LATEST_KEY_PREFIX}${regionId}:latest`;
-  const latestRaw = await getCachedJson(latestKey, true);
-  // The seed writer stores the id as a bare string (JSON-encoded). getCachedJson
-  // returns whatever the JSON parser produced, so we handle both shapes.
+  const latestRaw = await getCachedString(latestKey, true);
+  // The seed writer stores the id as a bare Redis string, not JSON.
+  // Read it through getCachedString() so we don't lose the pointer on JSON.parse.
   let snapshotId: string | null = null;
   if (typeof latestRaw === 'string') {
     snapshotId = latestRaw;
-  } else if (latestRaw && typeof latestRaw === 'object' && 'snapshot_id' in latestRaw) {
-    const candidate = (latestRaw as { snapshot_id?: unknown }).snapshot_id;
-    if (typeof candidate === 'string') snapshotId = candidate;
   }
   if (!snapshotId) {
     return {};

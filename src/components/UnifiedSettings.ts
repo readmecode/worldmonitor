@@ -2,6 +2,7 @@ import '@/styles/settings-window.css';
 import { FEEDS, INTEL_SOURCES, SOURCE_REGION_MAP } from '@/config/feeds';
 import { PANEL_CATEGORY_MAP, ALL_PANELS, VARIANT_DEFAULTS, getEffectivePanelConfig, isPanelEntitled, FREE_MAX_PANELS } from '@/config/panels';
 import { isProUser } from '@/services/widget-store';
+import { hasCapability } from '@/services/capabilities';
 import { SITE_VARIANT } from '@/config/variant';
 import { t } from '@/services/i18n';
 import type { MapProvider } from '@/config/basemap';
@@ -489,7 +490,7 @@ export class UnifiedSettings {
     if (!container) return;
 
     const savedSettings = this.config.getPanelSettings();
-    const pro = isProUser();
+    const pro = hasCapability('premium_ui') || isProUser();
     const entries = this.getVisiblePanelEntries();
     container.innerHTML = entries.map(([key, panel]) => {
       const entitled = isPanelEntitled(key, ALL_PANELS[key] ?? panel, pro);
@@ -534,8 +535,9 @@ export class UnifiedSettings {
   private toggleDraftPanel(key: string): void {
     const panel = this.draftPanelSettings[key];
     if (!panel) return;
-    if (!panel.enabled && !isPanelEntitled(key, ALL_PANELS[key] ?? panel, isProUser())) return;
-    if (!panel.enabled && !isProUser()) {
+    const pro = hasCapability('premium_ui') || isProUser();
+    if (!panel.enabled && !isPanelEntitled(key, ALL_PANELS[key] ?? panel, pro)) return;
+    if (!panel.enabled && !pro) {
       const enabledCount = Object.entries(this.draftPanelSettings).filter(([k, p]) => p.enabled && !k.startsWith('cw-')).length;
       if (enabledCount >= FREE_MAX_PANELS) {
         showToast(t('modals.settingsWindow.freePanelLimit', { max: String(FREE_MAX_PANELS) }));

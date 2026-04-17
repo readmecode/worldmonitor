@@ -9,7 +9,7 @@ import type {
 } from './types';
 import { haversineKm } from '@/utils/distance';
 import { IntelligenceServiceClient } from '@/generated/client/worldmonitor/intelligence/v1/service_client';
-import { hasPremiumAccess } from '@/services/panel-gating';
+import { hasCapability } from '@/services/capabilities';
 
 const LLM_SCORE_THRESHOLD = 60;
 const LLM_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -361,7 +361,7 @@ export class CorrelationEngine {
   // ── LLM Assessment ─────────────────────────────────────────
 
   private queueLlmAssessments(cards: ConvergenceCard[], adapter: DomainAdapter): void {
-    if (!hasPremiumAccess()) return;
+    if (!hasCapability('ai_enrichment')) return;
     const pending: Array<{ card: ConvergenceCard; cacheKey: string }> = [];
     for (const card of cards) {
       if (card.score < LLM_SCORE_THRESHOLD) continue;

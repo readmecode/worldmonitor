@@ -49,8 +49,7 @@ import type { TrafficAnomaly as ProtoTrafficAnomaly, DdosLocationHit } from '@/g
 import type { DiseaseOutbreakItem } from '@/services/disease-outbreaks';
 import type { GetChokepointStatusResponse } from '@/services/supply-chain';
 import type { ScenarioVisualState, ScenarioResult } from '@/config/scenario-templates';
-import { getAuthState } from '@/services/auth-state';
-import { hasPremiumAccess } from '@/services/panel-gating';
+import { hasCapability } from '@/services/capabilities';
 import { trackGateHit } from '@/services/analytics';
 
 export type { ScenarioVisualState, ScenarioResult };
@@ -1002,13 +1001,13 @@ export class MapContainer {
 
   /**
    * Activate a scenario across all active renderers.
-   * PRO-gated — free users trigger `trackGateHit('scenario-engine')` only.
+   * Capability-gated — callers without `scenario_engine` trigger `trackGateHit('scenario-engine')` only.
    *
    * @param scenarioId  Template ID from scenario-templates.ts
    * @param result      Computed result from the scenario worker
    */
   public activateScenario(scenarioId: string, result: ScenarioResult): void {
-    if (!hasPremiumAccess(getAuthState())) {
+    if (!hasCapability('scenario_engine')) {
       trackGateHit('scenario-engine');
       return;
     }

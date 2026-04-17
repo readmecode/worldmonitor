@@ -206,16 +206,23 @@ function categorizeStory(title) {
 }
 
 async function warmDigestCache() {
-  const apiBase = process.env.API_BASE_URL || 'https://api.worldmonitor.app';
+  const apiBase = process.env.API_BASE_URL
+    || (process.env.DEPLOYMENT_MODE === 'self_hosted' ? 'http://worldmonitor:8080' : 'https://api.worldmonitor.app');
   try {
     const resp = await fetch(`${apiBase}/api/news/v1/list-feed-digest?variant=full&lang=en`, {
       headers: { 'User-Agent': CHROME_UA },
       signal: AbortSignal.timeout(30_000),
     });
-    if (resp.ok) console.log('  Digest cache warmed via RPC');
-    else console.warn(`  Digest warm failed: HTTP ${resp.status}`);
+    if (!resp.ok) {
+      console.warn(`  Digest warm failed: HTTP ${resp.status}`);
+      return null;
+    }
+    const digest = await resp.json();
+    console.log('  Digest cache warmed via RPC');
+    return digest;
   } catch (err) {
     console.warn(`  Digest warm failed: ${err.message}`);
+    return null;
   }
 }
 
@@ -223,10 +230,11 @@ async function fetchInsights() {
   let digest = await readDigestFromRedis();
   if (!digest) {
     console.log('  Digest not in Redis, warming cache via RPC...');
-    await warmDigestCache();
+    const warmedDigest = await warmDigestCache();
     // Wait for RPC write to propagate to Redis
     await new Promise(r => setTimeout(r, 3_000));
     digest = await readDigestFromRedis();
+    if (!digest && warmedDigest) digest = warmedDigest;
   }
   if (!digest) {
     // LKG fallback: reuse existing insights if digest is unavailable

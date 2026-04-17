@@ -6,6 +6,7 @@ public/blog/
 *.log
 .env
 .env.local
+.env.local.save
 .playwright-mcp/
 *-network.txt
 .vercel

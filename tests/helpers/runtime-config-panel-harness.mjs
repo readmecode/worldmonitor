@@ -667,6 +667,7 @@ async function loadRuntimeConfigPanel() {
     ['panel-gating-stub', `
       export const PanelGateReason = { NONE: 'none', ANONYMOUS: 'anonymous', UNVERIFIED: 'unverified', FREE_TIER: 'free_tier' };
       export function getPanelGateReason() { return PanelGateReason.NONE; }
+      export function hasPremiumAccess() { return true; }
     `],
     ['dodo-checkout-stub', `
       export const DodoPayments = {

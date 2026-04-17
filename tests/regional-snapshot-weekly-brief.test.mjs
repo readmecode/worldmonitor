@@ -21,6 +21,7 @@ const root = resolve(__dirname, '..');
 const handlerSrc = readFileSync(resolve(root, 'server/worldmonitor/intelligence/v1/get-regional-brief.ts'), 'utf-8');
 const handlerIndexSrc = readFileSync(resolve(root, 'server/worldmonitor/intelligence/v1/handler.ts'), 'utf-8');
 const premiumPathsSrc = readFileSync(resolve(root, 'src/shared/premium-paths.ts'), 'utf-8');
+const capabilitiesSrc = readFileSync(resolve(root, 'src/shared/capabilities.ts'), 'utf-8');
 const gatewaySrc = readFileSync(resolve(root, 'server/gateway.ts'), 'utf-8');
 const protoSrc = readFileSync(resolve(root, 'proto/worldmonitor/intelligence/v1/get_regional_brief.proto'), 'utf-8');
 const serviceProtoSrc = readFileSync(resolve(root, 'proto/worldmonitor/intelligence/v1/service.proto'), 'utf-8');
@@ -212,7 +213,11 @@ describe('get-regional-brief handler', () => {
 // ── Security wiring ─────────────────────────────────────────────────────────
 
 describe('security wiring', () => {
-  it('adds the endpoint to PREMIUM_RPC_PATHS', () => {
+  it('adds the endpoint to RPC_REQUIRED_CAPABILITY', () => {
+    assert.match(capabilitiesSrc, /'\/api\/intelligence\/v1\/get-regional-brief':\s*'regional_intelligence'/);
+  });
+
+  it('keeps the endpoint in PREMIUM_RPC_PATHS for hosted compatibility', () => {
     assert.match(premiumPathsSrc, /'\/api\/intelligence\/v1\/get-regional-brief'/);
   });
 

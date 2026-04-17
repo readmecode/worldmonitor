@@ -23,7 +23,7 @@ import { t } from '@/services/i18n';
 import { SITE_VARIANT } from '@/config/variant';
 import { getGlobeRenderScale, resolveGlobePixelRatio, resolvePerformanceProfile, subscribeGlobeRenderScaleChange, getGlobeTexture, GLOBE_TEXTURE_URLS, subscribeGlobeTextureChange, getGlobeVisualPreset, subscribeGlobeVisualPresetChange, type GlobeRenderScale, type GlobePerformanceProfile, type GlobeVisualPreset } from '@/services/globe-render-settings';
 import { getLayersForVariant, resolveLayerLabel, bindLayerSearch, type MapVariant } from '@/config/map-layer-definitions';
-import { getSecretState } from '@/services/runtime-config';
+import { hasCapability } from '@/services/capabilities';
 import { resolveTradeRouteSegments, type TradeRouteSegment } from '@/config/trade-routes';
 import { GAMMA_IRRADIATORS } from '@/config/irradiators';
 import { AI_DATA_CENTERS } from '@/config/ai-datacenters';
@@ -1803,7 +1803,7 @@ export class GlobeMap {
 
   private createLayerToggles(): void {
     const layerDefs = getLayersForVariant((SITE_VARIANT || 'full') as MapVariant, 'globe');
-    const _wmKey = getSecretState('WORLDMONITOR_API_KEY').present;
+    const _wmKey = hasCapability('premium_ui');
     const layers = layerDefs.map(def => ({
       key: def.key,
       label: resolveLayerLabel(def, t),

@@ -16,17 +16,29 @@ git clone https://github.com/koala73/worldmonitor.git
 cd worldmonitor
 npm install
 
-# 2. Start the stack
+# 2. Create local env file
+cp .env.selfhosted.example .env.local
+
+# 3. Start the stack
 docker compose up -d        # or: uvx podman-compose up -d
 
-# 3. Seed data into Redis
+# 4. Seed data into Redis
 ./scripts/run-seeders.sh
 
-# 4. Open the dashboard
+# 5. Open the dashboard
 open http://localhost:3000
 ```
 
 The dashboard works out of the box with public data sources (earthquakes, weather, conflicts, etc.). API keys unlock additional data feeds.
+
+The self-hosted capability-layer is configured through:
+
+- [`VITE_DEPLOYMENT_MODE`](./.env.selfhosted.example)
+- [`DEPLOYMENT_MODE`](./.env.selfhosted.example)
+- [`VITE_SELF_HOSTED_FEATURES`](./.env.selfhosted.example)
+- [`SELF_HOSTED_FEATURES`](./.env.selfhosted.example)
+
+For a practical key guide, see [docs/self-hosted-keys.mdx](./docs/self-hosted-keys.mdx).
 
 ## 🔑 API Keys
 
@@ -194,6 +206,16 @@ services:
 ```
 
 ## 🐛 Troubleshooting
+
+### Collect a Debug Bundle (Logs + Health)
+
+If something looks off (health degraded, empty panels, seed errors), run:
+
+```bash
+./scripts/selfhosted-diagnose.sh
+```
+
+Then paste the output. It includes `docker compose ps`, service logs, and `/api/health`.
 
 | Issue | Fix |
 |-------|-----|

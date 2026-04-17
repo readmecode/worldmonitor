@@ -72,6 +72,28 @@ function createRedisAwareBacktestFetch(mockChartPayload: unknown) {
 
     if (url.startsWith(process.env.UPSTASH_REDIS_REST_URL || '')) {
       const parsed = new URL(url);
+      // Upstash supports both the path-based REST API (`/get/<key>`, `/pipeline`)
+      // and the "command in POST body" form (`POST /` with ["SET", ...]).
+      // The production code uses the POST-body form for SET to avoid oversized
+      // URL paths when values are large.
+      if (parsed.pathname === '/' && (init?.method || 'GET').toUpperCase() === 'POST') {
+        const rawBody = typeof init?.body === 'string' ? init.body : '[]';
+        const command = JSON.parse(rawBody) as unknown;
+        if (Array.isArray(command) && typeof command[0] === 'string') {
+          const [verb, key = '', value = '', ex, ttl] = command as Array<string | number>;
+          if (verb === 'SET') {
+            redis.set(String(key), String(value));
+            return new Response(JSON.stringify({ result: 'OK' }), { status: 200 });
+          }
+          if (verb === 'DEL') {
+            const existed = redis.delete(String(key));
+            return new Response(JSON.stringify({ result: existed ? 1 : 0 }), { status: 200 });
+          }
+          throw new Error(`Unexpected command verb: ${verb}`);
+        }
+        throw new Error(`Unexpected POST body: ${rawBody}`);
+      }
+
       if (parsed.pathname.startsWith('/get/')) {
         const key = decodeURIComponent(parsed.pathname.slice('/get/'.length));
         return new Response(JSON.stringify({ result: redis.get(key) ?? null }), { status: 200 });

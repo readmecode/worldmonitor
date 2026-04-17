@@ -6,6 +6,8 @@ import { isDesktopRuntime } from '@/services/runtime';
 import { getSecretState } from '@/services/runtime-config';
 // boundary-ignore: isEntitled is a pure state check with no side effects
 import { isEntitled } from '@/services/entitlements';
+// boundary-ignore: capability helpers are pure snapshot lookups with no side effects
+import { hasCapability, getRequiredCapabilityForPanel } from '@/services/capabilities';
 
 const _desktop = isDesktopRuntime();
 
@@ -963,6 +965,9 @@ export const FREE_MAX_SOURCES = 80;
  */
 export function isPanelEntitled(key: string, config: PanelConfig, isPro = false): boolean {
   if (!config.premium) return true;
+  const requiredCapability = getRequiredCapabilityForPanel(key);
+  if (requiredCapability && hasCapability(requiredCapability)) return true;
+  if (hasCapability('premium_ui')) return true;
   // Dodo entitlements unlock all premium panels
   if (isEntitled()) return true;
   const apiKeyPanels = ['stock-analysis', 'stock-backtest', 'daily-market-brief', 'market-implications', 'regional-intelligence', 'deduction', 'chat-analyst', 'wsb-ticker-scanner'];

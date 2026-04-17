@@ -112,18 +112,8 @@ import type { McpPanelSpec } from '@/services/mcp-store';
 import { getAuthState, subscribeAuthState } from '@/services/auth-state';
 import type { AuthSession } from '@/services/auth-state';
 import { PanelGateReason, getPanelGateReason, hasPremiumAccess } from '@/services/panel-gating';
+import { hasCapability, getRequiredCapabilityForPanel } from '@/services/capabilities';
 import type { Panel } from '@/components/Panel';
-
-/** Panels that require premium access on web. Auth-based gating applies to these. */
-const WEB_PREMIUM_PANELS = new Set([
-  'stock-analysis',
-  'stock-backtest',
-  'daily-market-brief',
-  'market-implications',
-  'deduction',
-  'chat-analyst',
-  'wsb-ticker-scanner',
-]);
 
 export interface PanelLayoutManagerCallbacks {
   openCountryStory: (code: string, name: string) => void;
@@ -263,7 +253,12 @@ export class PanelLayoutManager implements AppModule {
   /** Reactively update premium panel gating based on auth state. */
   private updatePanelGating(state: AuthSession): void {
     for (const [key, panel] of Object.entries(this.ctx.panels)) {
-      const isPremium = WEB_PREMIUM_PANELS.has(key);
+      const requiredCapability = getRequiredCapabilityForPanel(key);
+      const isPremium = Boolean(requiredCapability);
+      if (requiredCapability && hasCapability(requiredCapability)) {
+        (panel as Panel).unlockPanel();
+        continue;
+      }
       const reason = getPanelGateReason(state, isPremium);
 
       if (reason === PanelGateReason.NONE) {
@@ -744,7 +739,7 @@ export class PanelLayoutManager implements AppModule {
     this.createPanel('markets', () => new MarketPanel());
     this.createPanel('stock-analysis', () => new StockAnalysisPanel());
     this.createPanel('stock-backtest', () => new StockBacktestPanel());
-    // Web premium gating for stock-analysis and stock-backtest is handled
+    // Web capability gating for stock-analysis and stock-backtest is handled
     // reactively by updatePanelGating() via auth state subscription.
 
     const monitorPanel = this.createPanel('monitors', () => new MonitorPanel(this.ctx.monitors));
@@ -825,7 +820,8 @@ export class PanelLayoutManager implements AppModule {
 
     this.createPanel('gdelt-intel', () => new GdeltIntelPanel());
 
-    import('@/components/DeductionPanel').then(({ DeductionPanel }) => {
+    if (this.shouldCreatePanel('deduction')) {
+      import('@/components/DeductionPanel').then(({ DeductionPanel }) => {
       const deductionPanel = new DeductionPanel(() => this.ctx.allNews);
       this.ctx.panels['deduction'] = deductionPanel;
       const el = deductionPanel.getElement();
@@ -841,9 +837,11 @@ export class PanelLayoutManager implements AppModule {
       }
       this.applyPanelSettings();
       this.updatePanelGating(getAuthState());
-    });
+      });
+    }
 
-    import('@/components/RegionalIntelligenceBoard').then(({ RegionalIntelligenceBoard }) => {
+    if (this.shouldCreatePanel('regional-intelligence')) {
+      import('@/components/RegionalIntelligenceBoard').then(({ RegionalIntelligenceBoard }) => {
       const regionalBoard = new RegionalIntelligenceBoard();
       this.ctx.panels['regional-intelligence'] = regionalBoard;
       const el = regionalBoard.getElement();
@@ -859,7 +857,8 @@ export class PanelLayoutManager implements AppModule {
       }
       this.applyPanelSettings();
       this.updatePanelGating(getAuthState());
-    });
+      });
+    }
 
     if (this.shouldCreatePanel('cii')) {
       const ciiPanel = new CIIPanel();
@@ -972,7 +971,7 @@ export class PanelLayoutManager implements AppModule {
       }),
     );
 
-    const _lockPanels = this.ctx.isDesktopApp && !hasPremiumAccess();
+    const _lockPanels = this.ctx.isDesktopApp && !hasCapability('premium_ui');
 
     this.lazyPanel('daily-market-brief', () =>
       import('@/components/DailyMarketBriefPanel').then(m => new m.DailyMarketBriefPanel()),
@@ -981,8 +980,8 @@ export class PanelLayoutManager implements AppModule {
     this.lazyPanel('market-implications', () =>
       import('@/components/MarketImplicationsPanel').then(m => new m.MarketImplicationsPanel()),
     );
-    // Gating for daily-market-brief, market-implications, and chat-analyst is handled
-    // reactively by updatePanelGating() via auth state subscription (all in WEB_PREMIUM_PANELS).
+    // Capability gating for daily-market-brief, market-implications, and
+    // chat-analyst is handled reactively by updatePanelGating().
 
     this.lazyPanel('chat-analyst', () =>
       import('@/components/ChatAnalystPanel').then(m => new m.ChatAnalystPanel()),
@@ -1373,9 +1372,9 @@ export class PanelLayoutManager implements AppModule {
         block.style.display = isPro ? '' : 'none';
       }
     };
-    applyProBlockGating(hasPremiumAccess(getAuthState()));
+    applyProBlockGating(hasCapability('premium_ui') || hasPremiumAccess(getAuthState()));
     this.proBlockUnsubscribe = subscribeAuthState((state) => {
-      applyProBlockGating(hasPremiumAccess(state));
+      applyProBlockGating(hasCapability('premium_ui') || hasPremiumAccess(state));
     });
 
     const bottomGrid = document.getElementById('mapBottomGrid');

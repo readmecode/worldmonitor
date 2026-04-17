@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { PREMIUM_RPC_PATHS } from '../src/shared/premium-paths';
+import { RPC_REQUIRED_CAPABILITY } from '../src/shared/capabilities';
 import {
   LAYER_REGISTRY,
   getAllowedLayerKeys,
@@ -15,7 +16,12 @@ import {
 } from '../src/components/resilience-choropleth-utils';
 
 describe('resilience map layer contracts', () => {
-  it('registers resilience RPCs as premium paths', () => {
+  it('registers resilience RPCs in capability policy', () => {
+    assert.equal(RPC_REQUIRED_CAPABILITY['/api/resilience/v1/get-resilience-score'], 'resilience');
+    assert.equal(RPC_REQUIRED_CAPABILITY['/api/resilience/v1/get-resilience-ranking'], 'resilience');
+  });
+
+  it('keeps resilience RPCs in legacy premium paths for compatibility', () => {
     assert.ok(PREMIUM_RPC_PATHS.has('/api/resilience/v1/get-resilience-score'));
     assert.ok(PREMIUM_RPC_PATHS.has('/api/resilience/v1/get-resilience-ranking'));
   });

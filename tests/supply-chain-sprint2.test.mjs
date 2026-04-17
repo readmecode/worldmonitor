@@ -266,14 +266,27 @@ describe('Gateway slow-browser tier registration', () => {
 // ========================================================================
 
 describe('Premium paths registration', () => {
+  const capabilitiesSrc = readSrc('src/shared/capabilities.ts');
   const src = readSrc('src/shared/premium-paths.ts');
+
+  it('get-bypass-options is registered in RPC_REQUIRED_CAPABILITY', () => {
+    assert.match(capabilitiesSrc, /\/api\/supply-chain\/v1\/get-bypass-options':\s*'supply_chain_advanced'/);
+  });
 
   it('get-bypass-options is in PREMIUM_RPC_PATHS', () => {
     assert.match(src, /\/api\/supply-chain\/v1\/get-bypass-options/);
   });
 
+  it('get-country-cost-shock is registered in RPC_REQUIRED_CAPABILITY', () => {
+    assert.match(capabilitiesSrc, /\/api\/supply-chain\/v1\/get-country-cost-shock':\s*'supply_chain_advanced'/);
+  });
+
   it('get-country-cost-shock is in PREMIUM_RPC_PATHS', () => {
     assert.match(src, /\/api\/supply-chain\/v1\/get-country-cost-shock/);
+  });
+
+  it('get-sector-dependency is registered in RPC_REQUIRED_CAPABILITY', () => {
+    assert.match(capabilitiesSrc, /\/api\/supply-chain\/v1\/get-sector-dependency':\s*'supply_chain_advanced'/);
   });
 
   it('get-sector-dependency is in PREMIUM_RPC_PATHS', () => {

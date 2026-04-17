@@ -24,6 +24,11 @@ const premiumPathsSrc = readFileSync(
   'utf-8',
 );
 
+const capabilitiesSrc = readFileSync(
+  resolve(root, 'src/shared/capabilities.ts'),
+  'utf-8',
+);
+
 const gatewaySrc = readFileSync(
   resolve(root, 'server/gateway.ts'),
   'utf-8',
@@ -147,7 +152,11 @@ describe('intelligence handler registration', () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe('security wiring', () => {
-  it('adds the endpoint to PREMIUM_RPC_PATHS', () => {
+  it('adds the endpoint to RPC_REQUIRED_CAPABILITY', () => {
+    assert.match(capabilitiesSrc, /'\/api\/intelligence\/v1\/get-regime-history':\s*'regional_intelligence'/);
+  });
+
+  it('keeps the endpoint in PREMIUM_RPC_PATHS for hosted compatibility', () => {
     assert.match(premiumPathsSrc, /'\/api\/intelligence\/v1\/get-regime-history'/);
   });
 

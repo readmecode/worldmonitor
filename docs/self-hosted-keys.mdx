@@ -1,0 +1,311 @@
+---
+title: Self-Hosted Keys
+description: "Минимальный набор ключей для сильного self-hosted запуска: что делает каждый ключ, где его взять и бесплатный он или платный."
+---
+
+# Self-Hosted Keys
+
+Проверено по официальным страницам провайдеров **15 апреля 2026**.
+
+Ниже не весь список из репозитория, а именно **практичный минимальный набор** для сильного self-hosted запуска на локальной машине.
+
+## Что критично
+
+### 1. Redis
+
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+
+**Функция**
+
+- общий кэш;
+- seed data;
+- часть server handlers и health checks.
+
+**Где взять**
+
+- создать Redis database в Upstash;
+- скопировать REST URL и REST token из dashboard.
+
+**Стоимость**
+
+- есть бесплатный tier;
+- по официальной странице Upstash Redis free tier включает `256MB` и `500K commands/month`;
+- pay-as-you-go начинается от `$0.20 / 100K commands`.
+
+**Если не задать**
+
+- приложение запустится хуже;
+- часть данных, сидеров и кэша будет пустой или деградированной.
+
+## Очень желательно
+
+### 2. Groq
+
+- `GROQ_API_KEY`
+
+**Функция**
+
+- AI summaries;
+- AI briefs;
+- часть аналитического UX.
+
+**Где взять**
+
+- зарегистрироваться в GroqCloud;
+- создать API key в console.
+
+**Стоимость**
+
+- у Groq есть free onboarding;
+- для твоей модели `Llama 3.1 8B Instant` на официальной pricing page указано:
+  - input: `$0.05 / 1M tokens`
+  - output: `$0.08 / 1M tokens`
+
+**Если не задать**
+
+- данные будут, но AI briefs и summaries заметно просядут.
+
+### 3. ACLED
+
+- `ACLED_EMAIL`
+- `ACLED_PASSWORD`
+
+или fallback:
+
+- `ACLED_ACCESS_TOKEN`
+
+**Функция**
+
+- conflict / protest data;
+- regional intelligence;
+- resilience.
+
+**Где взять**
+
+- зарегистрировать `myACLED` account;
+- для API использовать OAuth flow или access token.
+
+**Стоимость**
+
+- на официальных страницах нет простой публичной fixed price table;
+- доступ зависит от уровня `myACLED` и типа организации;
+- в репо и docs это используется как основной источник conflict data.
+
+**Практически**
+
+- если есть institutional / research access, это один из самых ценных ключей во всем проекте.
+
+### 4. UCDP
+
+- `UCDP_ACCESS_TOKEN`
+
+**Функция**
+
+- альтернативный и дополняющий conflict feed;
+- усиливает regional intelligence и resilience.
+
+**Где взять**
+
+- запросить token у UCDP API maintainer.
+
+**Стоимость**
+
+- по официальной UCDP API docs API **free of charge**;
+- с февраля 2026 требуется token;
+- лимит указан как `5,000 requests/day`.
+
+### 5. Finnhub
+
+- `FINNHUB_API_KEY`
+
+**Функция**
+
+- market panels;
+- real-time stock quotes;
+- часть advanced market analysis.
+
+**Где взять**
+
+- зарегистрироваться в Finnhub и создать API key.
+
+**Стоимость**
+
+- у Finnhub есть free tier;
+- их pricing page есть, но в автоматическом просмотре она не отдала стабильную текстовую таблицу, поэтому точные текущие paid tiers лучше смотреть у них напрямую.
+
+**Если не задать**
+
+- рынок будет заметно слабее;
+- часть stock functionality уйдет в limited / fallback mode.
+
+### 6. FRED
+
+- `FRED_API_KEY`
+
+**Функция**
+
+- macro/economic data;
+- часть supply-chain;
+- часть resilience.
+
+**Где взять**
+
+- создать FRED account;
+- выпустить API key.
+
+**Стоимость**
+
+- публично доступный API key flow;
+- типичный практический вывод: это бесплатный ключ для использования API, но с terms/rate limits.
+
+**Если не задать**
+
+- часть экономических и supply-chain метрик будет урезана.
+
+### 7. AISStream
+
+- `AISSTREAM_API_KEY`
+
+**Функция**
+
+- live vessel tracking;
+- maritime layer.
+
+**Где взять**
+
+- зарегистрироваться в AISStream;
+- создать API key.
+
+**Стоимость**
+
+- официальный docs site описывает key-based access;
+- сервис помечен как `BETA` и `no SLA`;
+- публичной стабильной pricing table на их docs не видно.
+
+**Практически**
+
+- очень важен, если хочешь “живой” maritime experience.
+
+### 8. OpenSky
+
+- `OPENSKY_CLIENT_ID`
+- `OPENSKY_CLIENT_SECRET`
+
+**Функция**
+
+- aircraft / military flight data;
+- улучшенный доступ к flight API.
+
+**Где взять**
+
+- создать account в OpenSky;
+- создать API client и получить `client_id` / `client_secret`.
+
+**Стоимость**
+
+- OpenSky прямо пишет, что API можно использовать для personal and non-profit applications;
+- commercial use requires consent;
+- для расширенного historical/full data доступ зависит от review / license.
+
+**Практически**
+
+- для self-hosted non-commercial форка это один из лучших бесплатных/условно бесплатных ключей по ценности.
+
+## Полезно для “еще круче”
+
+### 9. EIA
+
+- `EIA_API_KEY`
+
+**Функция**
+
+- oil / energy analytics.
+
+**Где взять**
+
+- зарегистрировать API key в EIA Open Data.
+
+**Стоимость**
+
+- официальный registration flow открытый;
+- практический смысл: бесплатный ключ на open data API.
+
+### 10. NASA FIRMS
+
+- `NASA_FIRMS_API_KEY`
+
+**Функция**
+
+- wildfire / fire anomaly layer.
+
+**Где взять**
+
+- запросить `MAP_KEY` на FIRMS.
+
+**Стоимость**
+
+- официально FIRMS пишет, что `MAP_KEY` выдается **free**;
+- лимит: `5000 transactions / 10-minute interval`.
+
+### 11. Exa
+
+- `EXA_API_KEYS`
+
+**Функция**
+
+- targeted search для AI enrichment;
+- помогает advanced market analysis.
+
+**Где взять**
+
+- создать API key в Exa dashboard.
+
+**Стоимость**
+
+- pricing меняется по планам;
+- для self-hosted это полезный, но не критичный ключ.
+
+### 12. Cloudflare Radar
+
+- `CLOUDFLARE_API_TOKEN`
+
+**Функция**
+
+- internet outages.
+
+**Где взять**
+
+- создать API token в Cloudflare dashboard.
+
+**Стоимость**
+
+- практически это уже не “обязательный бесплатный источник”;
+- нужен, только если тебе реально важен outage intelligence слой.
+
+## Рекомендованный порядок
+
+Если не хочется тратить деньги зря, бери в таком порядке:
+
+1. `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`
+2. `GROQ_API_KEY`
+3. `ACLED_EMAIL` + `ACLED_PASSWORD` или `ACLED_ACCESS_TOKEN`
+4. `UCDP_ACCESS_TOKEN`
+5. `FRED_API_KEY`
+6. `FINNHUB_API_KEY`
+7. `AISSTREAM_API_KEY`
+8. `OPENSKY_CLIENT_ID` + `OPENSKY_CLIENT_SECRET`
+9. `EIA_API_KEY`
+10. `NASA_FIRMS_API_KEY`
+
+## Что не критично для self-hosted
+
+Для обычного self-hosted запуска не обязательны:
+
+- `CLERK_*`
+- `CONVEX_*`
+- `DODO_*`
+- `WORLDMONITOR_VALID_KEYS`
+
+Они относятся к hosted auth/billing и не нужны для нового capability-based self-hosted режима.
+

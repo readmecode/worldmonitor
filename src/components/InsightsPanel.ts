@@ -16,7 +16,7 @@ import { t } from '@/services/i18n';
 import { isDesktopRuntime } from '@/services/runtime';
 import { getAiFlowSettings, isAnyAiProviderEnabled, subscribeAiFlowChange } from '@/services/ai-flow-settings';
 import { getActiveFrameworkForPanel, subscribeFrameworkChange } from '@/services/analysis-framework-store';
-import { hasPremiumAccess } from '@/services/panel-gating';
+import { hasCapability } from '@/services/capabilities';
 import { FrameworkSelector } from './FrameworkSelector';
 import { getServerInsights, type ServerInsights, type ServerInsightStory } from '@/services/insights-loader';
 import { computeISQ, type SignalQuality, type SignalQualityInput } from '@/utils/signal-quality';
@@ -61,7 +61,7 @@ export class InsightsPanel extends Panel {
       void this.updateInsights(this.lastClusters);
     });
 
-    this.fwSelector = new FrameworkSelector({ panelId: 'insights', isPremium: hasPremiumAccess(), panel: this, note: 'Applies to client-generated analysis only' });
+    this.fwSelector = new FrameworkSelector({ panelId: 'insights', isPremium: hasCapability('premium_ui'), panel: this, note: 'Applies to client-generated analysis only' });
     this.header.appendChild(this.fwSelector.el);
   }
 

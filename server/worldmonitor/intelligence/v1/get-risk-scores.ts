@@ -585,6 +585,7 @@ function computeStrategicRisks(ciiScores: CiiScore[]): StrategicRisk[] {
 
 const RISK_CACHE_KEY = 'risk:scores:sebuf:v1';
 const RISK_STALE_CACHE_KEY = 'risk:scores:sebuf:stale:v1';
+const RISK_META_KEY = 'seed-meta:intelligence:risk-scores';
 const RISK_CACHE_TTL = 600;
 const RISK_STALE_TTL = 3600;
 
@@ -612,13 +613,29 @@ export async function getRiskScores(
     );
     if (result) {
       await setCachedJson(RISK_STALE_CACHE_KEY, result, RISK_STALE_TTL).catch(() => {});
+      await setCachedJson(RISK_META_KEY, {
+        fetchedAt: Date.now(),
+        recordCount: Array.isArray(result.ciiScores) ? result.ciiScores.length : 0,
+      }, 7 * 24 * 60 * 60, true).catch(() => {});
       return result;
     }
   } catch { /* upstream failed, fall through to stale */ }
 
   const stale = (await getCachedJson(RISK_STALE_CACHE_KEY)) as GetRiskScoresResponse | null;
-  if (stale) return stale;
+  if (stale) {
+    await setCachedJson(RISK_META_KEY, {
+      fetchedAt: Date.now(),
+      recordCount: Array.isArray(stale.ciiScores) ? stale.ciiScores.length : 0,
+    }, 7 * 24 * 60 * 60, true).catch(() => {});
+    return stale;
+  }
   const emptyAux: AuxiliarySources = { ucdpEvents: [], outages: [], climate: [], cyber: [], fires: [], gpsHexes: [], iranEvents: [], orefData: null, advisories: null, displacedByIso3: {}, newsTopStories: [], threatSummaryByCountry: null };
   const ciiScores = computeCIIScores([], emptyAux);
-  return { ciiScores, strategicRisks: computeStrategicRisks(ciiScores) };
+  const fallback = { ciiScores, strategicRisks: computeStrategicRisks(ciiScores) };
+  await setCachedJson(RISK_STALE_CACHE_KEY, fallback, RISK_STALE_TTL).catch(() => {});
+  await setCachedJson(RISK_META_KEY, {
+    fetchedAt: Date.now(),
+    recordCount: Array.isArray(fallback.ciiScores) ? fallback.ciiScores.length : 0,
+  }, 7 * 24 * 60 * 60, true).catch(() => {});
+  return fallback;
 }

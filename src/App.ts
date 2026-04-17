@@ -70,7 +70,6 @@ import { PanelLayoutManager } from '@/app/panel-layout';
 import { DataLoaderManager } from '@/app/data-loader';
 import { EventHandlerManager } from '@/app/event-handlers';
 import { resolveUserRegion, resolvePreciseUserCoordinates, type PreciseCoordinates } from '@/utils/user-location';
-import { showProBanner } from '@/components/ProBanner';
 import { initAuthState, subscribeAuthState } from '@/services/auth-state';
 import { install as installCloudPrefsSync, onSignIn as cloudPrefsSignIn, onSignOut as cloudPrefsSignOut } from '@/utils/cloud-prefs-sync';
 import { getConvexClient, getConvexApi, waitForConvexAuth } from '@/services/convex-client';
@@ -920,7 +919,6 @@ export class App {
 
     // Phase 1: Layout (creates map + panels — they'll find hydrated data)
     this.panelLayout.init();
-    showProBanner(this.state.container);
     this.updateConnectivityUi();
     window.addEventListener('online', this.handleConnectivityChange);
     window.addEventListener('offline', this.handleConnectivityChange);

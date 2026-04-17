@@ -7,7 +7,7 @@ import DOMPurify from 'dompurify';
 import type { NewsItem, DeductContextDetail } from '@/types';
 import { buildNewsContext } from '@/utils/news-context';
 import { getActiveFrameworkForPanel } from '@/services/analysis-framework-store';
-import { hasPremiumAccess } from '@/services/panel-gating';
+import { hasCapability } from '@/services/capabilities';
 import { FrameworkSelector } from './FrameworkSelector';
 
 const client = new IntelligenceServiceClient(getRpcBaseUrl(), { fetch: (...args) => globalThis.fetch(...args) });
@@ -98,7 +98,7 @@ export class DeductionPanel extends Panel {
         }) as EventListener;
         document.addEventListener('wm:deduct-context', this.contextHandler);
 
-        this.fwSelector = new FrameworkSelector({ panelId: 'deduction', isPremium: hasPremiumAccess(), panel: this });
+        this.fwSelector = new FrameworkSelector({ panelId: 'deduction', isPremium: hasCapability('regional_intelligence'), panel: this });
         this.header.appendChild(this.fwSelector.el);
     }
 

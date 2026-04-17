@@ -174,28 +174,44 @@ export function scoreImportance(cluster) {
 // Note: velocity filter omitted (vs frontend selectTopStories) because digest
 // items lack velocity data. Phase B may add velocity when RPC provides it.
 export function selectTopStories(clusters, maxCount = 8) {
-  const scored = clusters
+  const allScored = clusters
     .map(c => ({ cluster: c, score: scoreImportance(c) }))
-    .filter(({ cluster: c, score }) =>
-      (c.sourceCount || 1) >= 2 ||
-      c.isAlert ||
-      score > 100
-    )
     .sort((a, b) => b.score - a.score);
 
-  const selected = [];
-  const sourceCount = new Map();
-  const MAX_PER_SOURCE = 3;
+  const scored = allScored.filter(({ cluster: c, score }) =>
+    (c.sourceCount || 1) >= 2 ||
+    c.isAlert ||
+    score > 100
+  );
 
-  for (const { cluster, score } of scored) {
-    const source = cluster.primarySource;
-    const count = sourceCount.get(source) || 0;
-    if (count < MAX_PER_SOURCE) {
-      selected.push({ ...cluster, importanceScore: score });
-      sourceCount.set(source, count + 1);
+  const pick = (candidates) => {
+    const selected = [];
+    const sourceCount = new Map();
+    const MAX_PER_SOURCE = 3;
+
+    for (const { cluster, score } of candidates) {
+      const source = cluster.primarySource;
+      const count = sourceCount.get(source) || 0;
+      if (count < MAX_PER_SOURCE) {
+        selected.push({ ...cluster, importanceScore: score });
+        sourceCount.set(source, count + 1);
+      }
+      if (selected.length >= maxCount) break;
     }
-    if (selected.length >= maxCount) break;
-  }
+    return selected;
+  };
 
-  return selected;
+  // If the "importance floor" filters everything out (quiet news cycles,
+  // taxonomy shifts, or atypical headline phrasing), still return something
+  // rather than publishing an empty insights payload.
+  const filtered = pick(scored);
+  if (filtered.length > 0) return filtered;
+
+  // Soft fallback: only if there is enough volume and at least one item has
+  // meaningful signal. Avoid promoting trivial one-off headlines.
+  const bestScore = allScored.length > 0 ? allScored[0].score : 0;
+  if (clusters.length >= 3 && bestScore >= 60) {
+    return pick(allScored);
+  }
+  return [];
 }
