@@ -5,8 +5,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadEnvFile, runSeed, writeExtraKeyWithMeta } from './_seed-utils.mjs';
-// Edge helper, but it's just a static map.
-import { FALLBACK_PRICES } from '../api/_product-fallback-prices.js';
+
+// Self-hosted seed-worker runs inside the relay image which intentionally does
+// not ship the full Edge `api/` tree. Keep this script self-contained by
+// treating prices as optional.
+const FALLBACK_PRICES = {};
 
 loadEnvFile(import.meta.url);
 
@@ -16,7 +19,14 @@ const CACHE_TTL_SECONDS = 86400; // 24h
 async function loadProductIds() {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const productsPath = path.resolve(here, '../src/config/products.generated.ts');
-  const src = await readFile(productsPath, 'utf8');
+  let src = '';
+  try {
+    src = await readFile(productsPath, 'utf8');
+  } catch {
+    // In self-hosted docker images we don't ship `src/`. Returning an empty map
+    // still allows us to publish a stable catalog shape for the UI/health check.
+    return {};
+  }
   const ids = {};
   for (const match of src.matchAll(/^\s*([A-Z0-9_]+):\s*'([^']+)'\s*,?\s*$/gm)) {
     ids[match[1]] = match[2];

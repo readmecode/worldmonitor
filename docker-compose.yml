@@ -33,6 +33,8 @@ services:
       LOCAL_API_MODE: "docker"
       LOCAL_API_CLOUD_FALLBACK: "false"
       WS_RELAY_URL: "http://ais-relay:3004"
+      # Used only for privileged/refresh paths invoked by seed scripts.
+      WORLDMONITOR_VALID_KEYS: "${WORLDMONITOR_VALID_KEYS:-wm-local-token}"
     # Docker secrets (recommended for API keys — keeps them out of docker inspect).
     # Create secrets/ dir with one file per key, then uncomment below.
     # See SELF_HOSTING.md or docker-compose.override.yml for details.
@@ -77,12 +79,13 @@ services:
       dockerfile: Dockerfile.relay
     image: worldmonitor-ais-relay:latest
     container_name: worldmonitor-seed-worker
-    command: ["/app/seed-worker.sh"]
+    entrypoint: ["/bin/sh", "/app/seed-worker.sh"]
     environment:
       DEPLOYMENT_MODE: "self_hosted"
       NODE_OPTIONS: "--dns-result-order=ipv4first"
       UPSTASH_REDIS_REST_URL: "http://redis-rest:80"
       UPSTASH_REDIS_REST_TOKEN: "${REDIS_TOKEN:-wm-local-token}"
+      WORLDMONITOR_API_KEY: "${WORLDMONITOR_API_KEY:-wm-local-token}"
     depends_on:
       redis-rest:
         condition: service_healthy

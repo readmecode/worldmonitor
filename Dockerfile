@@ -18,7 +18,15 @@ ENV VITE_DEPLOYMENT_MODE=self_hosted
 
 # Install root dependencies (layer-cached until package.json changes)
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+# Docker builds can run in networks that sporadically reset connections.
+# Make npm more resilient (retries + longer timeouts) and pin the registry.
+ENV npm_config_registry=https://registry.npmjs.org/ \
+    npm_config_fetch_retries=5 \
+    npm_config_fetch_retry_mintimeout=20000 \
+    npm_config_fetch_retry_maxtimeout=120000 \
+    npm_config_audit=false \
+    npm_config_fund=false
+RUN npm ci --ignore-scripts --prefer-offline
 
 # Copy full source
 COPY . .
