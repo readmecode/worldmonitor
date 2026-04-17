@@ -74,6 +74,26 @@ export function sidecarCacheGet(key: string): unknown | null {
   return JSON.parse(entry.value);
 }
 
+// Raw getter for callers that need the underlying serialized JSON string.
+// Mirrors sidecarCacheGet() semantics (TTL, LRU) but skips JSON.parse.
+export function sidecarCacheGetString(key: string): string | null {
+  const entry = store.get(key);
+  if (!entry) {
+    missCount++;
+    return null;
+  }
+  if (entry.expiresAt <= Date.now()) {
+    totalBytes -= entry.size;
+    store.delete(key);
+    missCount++;
+    return null;
+  }
+  store.delete(key);
+  store.set(key, entry);
+  hitCount++;
+  return entry.value;
+}
+
 export function sidecarCacheSet(key: string, value: unknown, ttlSeconds: number): void {
   const clamped = Math.max(MIN_TTL_S, Math.min(MAX_TTL_S, ttlSeconds));
   const json = JSON.stringify(value);

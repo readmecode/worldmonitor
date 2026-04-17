@@ -16,7 +16,10 @@ WORKDIR /app
 
 # Install scripts/ runtime dependencies (telegram, ws, fast-xml-parser, etc.)
 COPY scripts/package.json scripts/package-lock.json ./scripts/
-RUN npm ci --prefix scripts --omit=dev
+# ws uses optional peer deps (bufferutil / utf-8-validate) for performance.
+# In Alpine builds they commonly require node-gyp. Omit peer deps so self-hosted
+# users don't need a build toolchain.
+RUN npm ci --prefix scripts --omit=dev --omit=optional --omit=peer
 
 # Relay script and shared helpers
 COPY scripts/ais-relay.cjs ./scripts/ais-relay.cjs

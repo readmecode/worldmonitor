@@ -21,7 +21,9 @@ const KEYS = {
 
 const FRED_KEY_PREFIX = 'economic:fred:v1';
 const STRESS_INDEX_KEY = 'economic:stress-index:v1';
-const STRESS_INDEX_TTL = 21600; // 6h
+// stress-index is computed inside this daily seed run; TTL must survive until
+// the next run or health will go EMPTY between cycles.
+const STRESS_INDEX_TTL = 93600; // 26h
 const FRED_TTL = 93600; // 26h — survive daily cron scheduling drift
 const ENERGY_TTL = 3600;
 const CAPACITY_TTL = 86400;
@@ -151,13 +153,15 @@ function computeStressIndex(fr) {
 
     if (rawValue === null) {
       missingCount++;
-      if (comp.id !== 'GSCPI') {
-        // FRED-sourced component missing = refuse to publish degraded composite.
-        throw new Error(`StressIndex: required FRED component ${comp.id} missing — refusing to publish partial composite`);
-      }
-      console.warn(`  [StressIndex] ${comp.id} missing (ais-relay lag) — excluding`);
+      // Keep component inventory so downstream can show what's missing.
+      const isGscpi = comp.id === 'GSCPI';
+      if (isGscpi) console.warn(`  [StressIndex] ${comp.id} missing (ais-relay lag) — excluding`);
+      else console.warn(`  [StressIndex] ${comp.id} missing — marking composite unavailable`);
       components.push({ id: comp.id, label: comp.label, rawValue: null, missing: true, score: 0, weight: comp.weight });
-      continue;
+      // Missing non-GSCPI makes the composite unreliable; still publish an
+      // explicit "unavailable" payload so health doesn't go EMPTY.
+      if (!isGscpi) return { compositeScore: 0, label: '', components, seededAt: new Date().toISOString(), unavailable: true };
+      continue; // GSCPI is optional
     }
 
     const score = comp.score(rawValue);
@@ -169,7 +173,7 @@ function computeStressIndex(fr) {
 
   if (totalWeight === 0) {
     console.warn('  [StressIndex] No FRED data — skipping write');
-    return null;
+    return { compositeScore: 0, label: '', components, seededAt: new Date().toISOString(), unavailable: true };
   }
 
   const compositeScore = Math.round((weightedSum / totalWeight) * 10) / 10;
@@ -874,11 +878,13 @@ async function fetchAll() {
     try {
       stressResult = computeStressIndex(fr);
     } catch (e) {
-      console.warn(`  [StressIndex] skipped write — ${e.message}`);
+      console.warn(`  [StressIndex] compute failed — publishing unavailable payload (${e.message})`);
+      stressResult = { compositeScore: 0, label: '', components: [], seededAt: new Date().toISOString(), unavailable: true };
     }
-    if (stressResult) {
-      await writeExtraKeyWithMeta(STRESS_INDEX_KEY, stressResult, STRESS_INDEX_TTL, STRESS_COMPONENTS.length);
+    if (!stressResult) {
+      stressResult = { compositeScore: 0, label: '', components: [], seededAt: new Date().toISOString(), unavailable: true };
     }
+    await writeExtraKeyWithMeta(STRESS_INDEX_KEY, stressResult, STRESS_INDEX_TTL, 1);
   }
 
   return ep || { prices: [] };

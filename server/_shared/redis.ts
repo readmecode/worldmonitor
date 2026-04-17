@@ -85,6 +85,36 @@ export async function getCachedJson(key: string, raw = false): Promise<unknown |
   }
 }
 
+/**
+ * Fetch a Redis value as a raw string (no JSON.parse, no envelope unwrap).
+ * Useful for very large blobs or handlers that want to control parsing.
+ */
+export async function getCachedString(key: string, raw = false): Promise<string | null> {
+  if (process.env.LOCAL_API_MODE === 'tauri-sidecar') {
+    const { sidecarCacheGetString } = await import('./sidecar-cache');
+    return sidecarCacheGetString(key);
+  }
+
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  try {
+    const finalKey = raw ? key : prefixKey(key);
+    const resp = await fetch(`${url}/get/${encodeURIComponent(finalKey)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(REDIS_OP_TIMEOUT_MS),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as { result?: string };
+    const result = data.result ?? null;
+    if (!result || result === NEG_SENTINEL) return null;
+    return result;
+  } catch (err) {
+    console.warn('[redis] getCachedString failed:', errMsg(err));
+    return null;
+  }
+}
+
 export async function setCachedJson(key: string, value: unknown, ttlSeconds: number, raw = false): Promise<void> {
   if (process.env.LOCAL_API_MODE === 'tauri-sidecar') {
     const { sidecarCacheSet } = await import('./sidecar-cache');

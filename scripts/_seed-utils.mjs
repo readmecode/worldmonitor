@@ -782,6 +782,11 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     extraKeys,
     afterPublish,
     publishTransform,
+    // Optional: additional keys that should have their TTL extended when the
+    // seed run fails gracefully (fetch failure, contract RETRY, validation
+    // skip). This prevents dependent keys (written via afterPublish) from
+    // expiring and tripping health checks during upstream outages.
+    failureExtendKeys,
     declareRecords,        // new — contract opt-in. When present, runSeed enters
                            // envelope-dual-write path: writes `{_seed, data}` to
                            // canonicalKey alongside legacy `seed-meta:*` key.
@@ -833,6 +838,7 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     const ttl = ttlSeconds || 600;
     const keys = [canonicalKey, `seed-meta:${domain}:${resource}`];
     if (extraKeys) keys.push(...extraKeys.map(ek => ek.key));
+    if (Array.isArray(failureExtendKeys)) keys.push(...failureExtendKeys);
     await extendExistingTtl(keys, ttl);
 
     console.log(`\n=== Failed gracefully (${Math.round(durationMs)}ms) ===`);
@@ -881,6 +887,7 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
       const durationMs = Date.now() - startMs;
       const keys = [canonicalKey, `seed-meta:${domain}:${resource}`];
       if (extraKeys) keys.push(...extraKeys.map(ek => ek.key));
+      if (Array.isArray(failureExtendKeys)) keys.push(...failureExtendKeys);
       await extendExistingTtl(keys, ttlSeconds || 600);
       console.log(`  RETRY: declareRecords returned 0 (zeroIsValid=false) — envelope unchanged, TTL extended, bundle will retry next cycle`);
       console.log(`\n=== Done (${Math.round(durationMs)}ms, RETRY) ===`);
@@ -893,6 +900,7 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
       const durationMs = Date.now() - startMs;
       const keys = [canonicalKey, `seed-meta:${domain}:${resource}`];
       if (extraKeys) keys.push(...extraKeys.map(ek => ek.key));
+      if (Array.isArray(failureExtendKeys)) keys.push(...failureExtendKeys);
       await extendExistingTtl(keys, ttlSeconds || 600);
       const strictFailure = Boolean(opts.emptyDataIsFailure);
       if (strictFailure) {
