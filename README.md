@@ -71,7 +71,38 @@ npm run dev:commodity  # commodity.worldmonitor.app
 npm run dev:happy      # happy.worldmonitor.app
 ```
 
-See the **[self-hosting guide](https://www.worldmonitor.app/docs/getting-started)** for deployment options (Vercel, Docker, static).
+See [SELF_HOSTING.md](./SELF_HOSTING.md) for Docker/self-hosted details and local environment templates.
+
+---
+
+## Self-Hosted (Docker) Quick Start
+
+This repo ships a self-contained Docker Compose stack (app + Redis + seed workers) intended for local/self-hosted operation.
+
+```bash
+cp .env.selfhosted.example .env.local
+docker compose up -d --build
+```
+
+Open:
+
+- App: http://localhost:3000
+- Health: http://localhost:3000/api/health
+
+### Diagnosing Self-Hosted Issues
+
+Run:
+
+```bash
+./scripts/selfhosted-diagnose.sh
+```
+
+It prints container status, `GET /api/health`, and key endpoint samples in one paste-friendly output.
+
+### Notes
+
+- The stack degrades gracefully when provider keys are missing; many checks surface as `EMPTY_ON_DEMAND` (warn) rather than critical failures.
+- Self-hosted feature flags live in `.env.local` via `VITE_SELF_HOSTED_FEATURES` / `SELF_HOSTED_FEATURES` (see `.env.selfhosted.example`).
 
 ---
 
