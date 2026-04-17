@@ -9,6 +9,15 @@ import { redisPipeline, getRedisCredentials } from './_upstash-json.js';
 
 export const config = { runtime: 'edge' };
 
+function hasSecret(key) {
+  return Boolean(process.env[key]?.trim());
+}
+
+function isSelfHostedLike() {
+  const mode = process.env.DEPLOYMENT_MODE;
+  return mode === 'self_hosted' || mode === 'dev_full';
+}
+
 const BOOTSTRAP_KEYS = {
   earthquakes:       'seismology:earthquakes:v1',
   outages:           'infra:outages:v1',
@@ -294,7 +303,7 @@ const SEED_META = {
   consumerPricesOverview:   { key: 'seed-meta:consumer-prices:overview:ae',     maxStaleMin: 1500 }, // 25h = 24h cadence + 1h grace
   consumerPricesCategories: { key: 'seed-meta:consumer-prices:categories:ae:30d',            maxStaleMin: 1500 },
   consumerPricesMovers:     { key: 'seed-meta:consumer-prices:movers:ae:30d',               maxStaleMin: 1500 },
-  consumerPricesSpread:     { key: 'seed-meta:consumer-prices:retailer-spread:ae:essentials-ae', maxStaleMin: 1500 },
+  consumerPricesSpread:     { key: 'seed-meta:consumer-prices:spread:ae', maxStaleMin: 1500 },
   consumerPricesFreshness:  { key: 'seed-meta:consumer-prices:freshness:ae',    maxStaleMin: 1500 },
   // defiTokens/aiTokens/otherTokens all share one seed run (seed-token-panels cron, every 30min)
   defiTokens:        { key: 'seed-meta:market:token-panels', maxStaleMin: 90 },
@@ -429,7 +438,26 @@ const EMPTY_DATA_OK_KEYS = new Set([
   'recoveryImportHhi', 'recoveryFuelStocks', // recovery pillar seeds: stub seeders write empty payloads until real sources are wired
   'ddosAttacks', 'trafficAnomalies', // zero events during quiet periods is valid, not critical
   'resilienceStaticFao', // empty aggregate = no IPC Phase 3+ countries this year (possible in theory); the key must exist but count=0 is fine
+  'thermalEscalation', // common: no thermal anomalies detected; 0 is a valid state
 ]);
+
+// Self-hosted stacks often run without ACLED access (or behind egress controls).
+// Treat "0 unrest events" as a non-fatal state so health reflects infra issues.
+if (isSelfHostedLike()) {
+  EMPTY_DATA_OK_KEYS.add('unrestEvents');
+  // Fire detections can be legitimately empty (rate-limits, API coverage gaps, or egress).
+  // In self-hosted mode prefer warning on staleness over paging on emptiness.
+  EMPTY_DATA_OK_KEYS.add('wildfires');
+
+  // Cable health is derived from an on-demand RPC warm-ping loop; empty before first visit
+  // (or during transient cache write failures) shouldn't page self-hosted operators.
+  ON_DEMAND_KEYS.add('cableHealth');
+
+  // Self-hosted installs may not run the hosted cron cadence for these computed keys.
+  // Relax stale thresholds so a quiet dashboard isn't stuck in WARNING.
+  if (SEED_META.macroSignals) SEED_META.macroSignals.maxStaleMin = 1440; // 24h
+  if (SEED_META.economicStress) SEED_META.economicStress.maxStaleMin = 1440; // 24h
+}
 
 // Cascade groups: if any key in the group has data, all empty siblings are OK.
 // Theater posture uses live → stale → backup fallback chain.
@@ -506,7 +534,25 @@ function isCascadeCovered(name, hasData, keyStrens, keyErrors) {
 function classifyKey(name, redisKey, opts, ctx) {
   const { keyStrens, keyErrors, keyMetaValues, keyMetaErrors, now } = ctx;
   const seedCfg = SEED_META[name];
-  const isOnDemand = !!opts.allowOnDemand && ON_DEMAND_KEYS.has(name);
+  const isProviderLimited = isSelfHostedLike() && (
+    ((!hasSecret('CLOUDFLARE_API_TOKEN')) && ['outages', 'ddosAttacks', 'trafficAnomalies', 'serviceStatuses'].includes(name))
+    || ((!hasSecret('WINGBITS_API_KEY')) && ['gpsjam'].includes(name))
+    || ((!hasSecret('UCDP_ACCESS_TOKEN')) && ['ucdpEvents'].includes(name))
+    || ((!hasSecret('EIA_API_KEY')) && ['fuelPrices', 'crudeInventories', 'natGasStorage', 'spr', 'refineryInputs', 'electricityPrices'].includes(name))
+    || ((!hasSecret('ICAO_API_KEY')) && ['notamClosures'].includes(name))
+    || ((!hasSecret('AVIATIONSTACK_API') && !hasSecret('AVIATIONSTACK_API_KEY')) && ['intlDelays'].includes(name))
+    || ((!hasSecret('WTO_API_KEY')) && ['tariffTrendsUs'].includes(name))
+    || ((!hasSecret('FINNHUB_API_KEY')) && ['earningsCalendar'].includes(name))
+    || ((!hasSecret('COMTRADE_API_KEYS')) && ['recoveryImportHhi'].includes(name))
+    || ((!hasSecret('EXA_API_KEYS') && !hasSecret('EXA_API_KEY')) && ['groceryBasket', 'bigmac'].includes(name))
+    || ((!hasSecret('ENABLE_IMF_EXTENDED_SEEDS')) && ['imfGrowth', 'imfLabor', 'imfExternal'].includes(name))
+    || ((!hasSecret('OPENAQ_API_KEY')) && ['climateAirQuality', 'healthAirQuality'].includes(name))
+    || ((!hasSecret('NASA_FIRMS_API_KEY')) && ['wildfires'].includes(name))
+    || ((!hasSecret('CONSUMER_PRICES_CORE_BASE_URL')) && ['consumerPricesOverview', 'consumerPricesCategories', 'consumerPricesMovers', 'consumerPricesSpread', 'consumerPricesFreshness'].includes(name))
+    // Best-effort sources that are commonly blocked/empty in self-hosted deployments.
+    || (['iranEvents', 'socialVelocity', 'wsbTickers'].includes(name))
+  );
+  const isOnDemand = (!!opts.allowOnDemand && ON_DEMAND_KEYS.has(name)) || isProviderLimited;
 
   const meta = readSeedMeta(seedCfg, keyMetaValues, keyMetaErrors, now);
 
@@ -532,13 +578,15 @@ function classifyKey(name, redisKey, opts, ctx) {
   if (seedError) status = 'SEED_ERROR';
   else if (!hasData) {
     if (cascadeCovered) status = 'OK_CASCADE';
+    else if (isProviderLimited) status = 'EMPTY_ON_DEMAND';
     else if (EMPTY_DATA_OK_KEYS.has(name)) status = seedStale === true ? 'STALE_SEED' : 'OK';
     else if (isOnDemand) status = 'EMPTY_ON_DEMAND';
     else status = 'EMPTY';
   } else if (records === 0) {
     // hasData is true in this branch, so cascade can never apply (isCascadeCovered
     // short-circuits when hasData=true). Cascade only shields wholly absent keys.
-    if (EMPTY_DATA_OK_KEYS.has(name)) status = seedStale === true ? 'STALE_SEED' : 'OK';
+    if (isProviderLimited) status = 'EMPTY_ON_DEMAND';
+    else if (EMPTY_DATA_OK_KEYS.has(name)) status = seedStale === true ? 'STALE_SEED' : 'OK';
     else if (isOnDemand) status = 'EMPTY_ON_DEMAND';
     else status = 'EMPTY_DATA';
   } else if (seedStale === true) status = 'STALE_SEED';

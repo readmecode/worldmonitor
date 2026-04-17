@@ -20,14 +20,20 @@ const PURIFY_CONFIG = {
 
 const UNSAFE_STYLE_PATTERN = /url\s*\(|expression\s*\(|javascript\s*:|@import|behavior\s*:/i;
 
-DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
-  if (data.attrName === 'style' && UNSAFE_STYLE_PATTERN.test(data.attrValue)) {
-    data.keepAttr = false;
-  }
-});
+// DOMPurify's Node entrypoint can export a factory-like value depending on
+// bundler/test environment. Guard so importing this module never throws.
+const PurifyAny = DOMPurify as unknown as { addHook?: Function; sanitize?: Function };
+if (typeof PurifyAny.addHook === 'function') {
+  PurifyAny.addHook('uponSanitizeAttribute', (_node: unknown, data: any) => {
+    if (data?.attrName === 'style' && UNSAFE_STYLE_PATTERN.test(String(data?.attrValue ?? ''))) {
+      data.keepAttr = false;
+    }
+  });
+}
 
 export function sanitizeWidgetHtml(html: string): string {
-  return DOMPurify.sanitize(html, PURIFY_CONFIG) as unknown as string;
+  if (typeof PurifyAny.sanitize !== 'function') return html;
+  return (PurifyAny.sanitize(html, PURIFY_CONFIG) as unknown as string) ?? '';
 }
 
 // Strip a leading .panel-header that the agent may generate — the outer
@@ -109,7 +115,7 @@ function mountProWidget(iframe: HTMLIFrameElement): void {
   });
 }
 
-if (typeof document !== 'undefined') {
+if (typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') {
   const observer = new MutationObserver((mutations) => {
     for (const mut of mutations) {
       for (const node of mut.addedNodes) {

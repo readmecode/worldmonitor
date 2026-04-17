@@ -24,6 +24,32 @@ const { parseProxyConfig, resolveProxyString } = require('./_proxy-utils.cjs');
 const parseProxyUrl = parseProxyConfig;
 
 const httpsKeepAliveAgent = new https.Agent({ keepAlive: true, maxSockets: 6, timeout: 60_000 });
+const RPC_BASE_URL = (() => {
+  const explicit = (process.env.WORLDMONITOR_RPC_BASE_URL || process.env.API_BASE_URL || '').trim();
+  if (explicit) return explicit.replace(/\/$/, '');
+  if (process.env.DEPLOYMENT_MODE === 'self_hosted') return 'http://worldmonitor:8080';
+  return 'https://api.worldmonitor.app';
+})();
+
+const IS_SELF_HOSTED = process.env.DEPLOYMENT_MODE === 'self_hosted';
+
+async function waitForRpcReady(timeoutMs = 60_000) {
+  if (!IS_SELF_HOSTED) return;
+  const healthUrl = `${RPC_BASE_URL}/api/health`;
+  const startedAt = Date.now();
+  for (;;) {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > timeoutMs) {
+      console.warn(`[Relay] WARN: RPC base not ready after ${Math.round(timeoutMs / 1000)}s (${healthUrl})`);
+      return;
+    }
+    try {
+      const resp = await fetch(healthUrl, { signal: AbortSignal.timeout(2000) });
+      if (resp.ok) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
 
 function requireShared(name) {
   const candidates = [path.join(__dirname, '..', 'shared', name), path.join(__dirname, 'shared', name)];
@@ -152,17 +178,19 @@ if (IS_PRODUCTION_RELAY && !RELAY_SHARED_SECRET && !ALLOW_UNAUTHENTICATED_RELAY)
 // ─────────────────────────────────────────────────────────────
 const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL || '';
 const UPSTASH_REDIS_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+const UPSTASH_URL_IS_SUPPORTED = UPSTASH_REDIS_REST_URL.startsWith('https://') || UPSTASH_REDIS_REST_URL.startsWith('http://');
 const UPSTASH_ENABLED = !!(
   UPSTASH_REDIS_REST_URL &&
   UPSTASH_REDIS_REST_TOKEN &&
-  UPSTASH_REDIS_REST_URL.startsWith('https://')
+  UPSTASH_URL_IS_SUPPORTED
 );
+const upstashRequest = UPSTASH_REDIS_REST_URL.startsWith('http://') ? http.request : https.request;
 const RELAY_ENV_PREFIX = process.env.RELAY_ENV ? `${process.env.RELAY_ENV}:` : '';
 const OREF_REDIS_KEY = `${RELAY_ENV_PREFIX}relay:oref:history:v1`;
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
-if (UPSTASH_REDIS_REST_URL && !UPSTASH_REDIS_REST_URL.startsWith('https://')) {
-  console.warn('[Relay] UPSTASH_REDIS_REST_URL must start with https:// — Redis disabled');
+if (UPSTASH_REDIS_REST_URL && !UPSTASH_URL_IS_SUPPORTED) {
+  console.warn('[Relay] UPSTASH_REDIS_REST_URL must start with http:// or https:// — Redis disabled');
 }
 if (UPSTASH_ENABLED) {
   console.log(`[Relay] Upstash Redis enabled (key: ${OREF_REDIS_KEY})`);
@@ -172,7 +200,7 @@ function upstashGet(key) {
   return new Promise((resolve) => {
     if (!UPSTASH_ENABLED) return resolve(null);
     const url = new URL(`/get/${encodeURIComponent(key)}`, UPSTASH_REDIS_REST_URL);
-    const req = https.request(url, {
+    const req = upstashRequest(url, {
       method: 'GET',
       headers: { Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}` },
       timeout: 5000,
@@ -202,7 +230,7 @@ function upstashSet(key, value, ttlSeconds) {
     if (!UPSTASH_ENABLED) return resolve(false);
     const url = new URL('/', UPSTASH_REDIS_REST_URL);
     const body = JSON.stringify(['SET', key, JSON.stringify(value), 'EX', String(ttlSeconds)]);
-    const req = https.request(url, {
+    const req = upstashRequest(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}`,
@@ -230,7 +258,7 @@ function upstashExpire(key, ttlSeconds) {
     if (!UPSTASH_ENABLED) return resolve(false);
     const url = new URL('/', UPSTASH_REDIS_REST_URL);
     const body = JSON.stringify(['EXPIRE', key, String(ttlSeconds)]);
-    const req = https.request(url, {
+    const req = upstashRequest(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}`,
@@ -258,7 +286,7 @@ function upstashMGet(keys) {
     if (!UPSTASH_ENABLED || keys.length === 0) return resolve([]);
     const url = new URL('/pipeline', UPSTASH_REDIS_REST_URL);
     const body = JSON.stringify(keys.map((k) => ['GET', k]));
-    const req = https.request(url, {
+    const req = upstashRequest(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}`,
@@ -294,7 +322,7 @@ function upstashLpush(key, value) {
     const url = new URL('/', UPSTASH_REDIS_REST_URL);
     const serialized = typeof value === 'string' ? value : JSON.stringify(value);
     const body = JSON.stringify(['LPUSH', key, serialized]);
-    const req = https.request(url, {
+    const req = upstashRequest(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}`,
@@ -323,7 +351,7 @@ function upstashSetNx(key, value, ttlSeconds) {
     const url = new URL('/', UPSTASH_REDIS_REST_URL);
     const serialized = typeof value === 'string' ? value : JSON.stringify(value);
     const body = JSON.stringify(['SET', key, serialized, 'NX', 'EX', String(ttlSeconds)]);
-    const req = https.request(url, {
+    const req = upstashRequest(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}`,
@@ -857,6 +885,9 @@ function orefDateToUTC(dateStr) {
 }
 
 function orefCurlFetch(proxyAuth, url, { toFile } = {}) {
+  if (!proxyAuth) {
+    throw new Error('OREF proxy not configured');
+  }
   // Use curl via child_process — Node.js TLS fingerprint (JA3) gets blocked by Akamai,
   // but curl's fingerprint passes. curl is available on Railway (Linux) and macOS.
   // execFileSync avoids shell interpolation — safe with special chars in proxy credentials.
@@ -1247,6 +1278,11 @@ async function orefBootstrapHistoryWithRetry() {
   }
 
   // Phase 2: upstream with retry + exponential backoff
+  if (!OREF_PROXY_AVAILABLE) {
+    console.log('[Relay] OREF upstream bootstrap skipped — no OREF proxy configured');
+    return;
+  }
+
   const MAX_ATTEMPTS = 3;
   const BASE_DELAY_MS = 3000;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -3636,7 +3672,7 @@ async function classifyFetchLlm(titles) {
 let classifyInFlight = false;
 
 async function seedClassifyForVariant(variant, seenTitles) {
-  const digestUrl = `https://api.worldmonitor.app/api/news/v1/list-feed-digest?variant=${variant}&lang=en`;
+  const digestUrl = `${RPC_BASE_URL}/api/news/v1/list-feed-digest?variant=${variant}&lang=en`;
   let digest;
   try {
     const resp = await new Promise((resolve, reject) => {
@@ -3862,7 +3898,7 @@ async function startClassifySeedLoop() {
 // so service statuses are always cached (TTL is 30 min).
 // ─────────────────────────────────────────────────────────────
 const SERVICE_STATUSES_SEED_INTERVAL_MS = 15 * 60 * 1000; // 15 min (TTL/2)
-const SERVICE_STATUSES_RPC_URL = 'https://api.worldmonitor.app/api/infrastructure/v1/list-service-statuses';
+const SERVICE_STATUSES_RPC_URL = `${RPC_BASE_URL}/api/infrastructure/v1/list-service-statuses`;
 
 async function seedServiceStatuses() {
   try {
@@ -3892,10 +3928,13 @@ async function seedServiceStatuses() {
 
 function startServiceStatusesSeedLoop() {
   console.log(`[ServiceStatuses] Seed loop starting (interval ${SERVICE_STATUSES_SEED_INTERVAL_MS / 1000 / 60}min)`);
-  seedServiceStatuses().catch((e) => console.warn('[ServiceStatuses] Initial seed error:', e?.message || e));
-  setInterval(() => {
-    seedServiceStatuses().catch((e) => console.warn('[ServiceStatuses] Seed error:', e?.message || e));
-  }, SERVICE_STATUSES_SEED_INTERVAL_MS).unref?.();
+  (async () => {
+    await waitForRpcReady();
+    seedServiceStatuses().catch((e) => console.warn('[ServiceStatuses] Initial seed error:', e?.message || e));
+    setInterval(() => {
+      seedServiceStatuses().catch((e) => console.warn('[ServiceStatuses] Seed error:', e?.message || e));
+    }, SERVICE_STATUSES_SEED_INTERVAL_MS).unref?.();
+  })().catch((e) => console.warn('[ServiceStatuses] Warm-up failed:', e?.message || e));
 }
 
 
@@ -4442,7 +4481,7 @@ function startTheaterPostureSeedLoop() {
 // The RPC handler itself refreshes the stale key on every call.
 // ─────────────────────────────────────────────────────────────
 const CII_WARM_PING_INTERVAL_MS = 8 * 60 * 1000; // 8 min (live cache TTL is 10 min)
-const CII_RPC_URL = 'https://api.worldmonitor.app/api/intelligence/v1/get-risk-scores';
+const CII_RPC_URL = `${RPC_BASE_URL}/api/intelligence/v1/get-risk-scores`;
 
 async function seedCiiWarmPing() {
   try {
@@ -4470,10 +4509,13 @@ async function seedCiiWarmPing() {
 
 function startCiiWarmPingLoop() {
   console.log(`[CII] Warm-ping loop starting (interval ${CII_WARM_PING_INTERVAL_MS / 1000 / 60}min)`);
-  seedCiiWarmPing().catch((e) => console.warn('[CII] Initial warm-ping error:', e?.message || e));
-  setInterval(() => {
-    seedCiiWarmPing().catch((e) => console.warn('[CII] Warm-ping error:', e?.message || e));
-  }, CII_WARM_PING_INTERVAL_MS).unref?.();
+  (async () => {
+    await waitForRpcReady();
+    seedCiiWarmPing().catch((e) => console.warn('[CII] Initial warm-ping error:', e?.message || e));
+    setInterval(() => {
+      seedCiiWarmPing().catch((e) => console.warn('[CII] Warm-ping error:', e?.message || e));
+    }, CII_WARM_PING_INTERVAL_MS).unref?.();
+  })().catch((e) => console.warn('[CII] Warm-up failed:', e?.message || e));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -4483,7 +4525,7 @@ function startCiiWarmPingLoop() {
 // Interval matches health.js maxStaleMin (60 min) with a 2× margin.
 // ─────────────────────────────────────────────────────────────
 const CHOKEPOINT_WARM_PING_INTERVAL_MS = 30 * 60 * 1000; // 30 min
-const CHOKEPOINT_RPC_URL = 'https://api.worldmonitor.app/api/supply-chain/v1/get-chokepoint-status';
+const CHOKEPOINT_RPC_URL = `${RPC_BASE_URL}/api/supply-chain/v1/get-chokepoint-status`;
 
 async function seedChokepointWarmPing() {
   try {
@@ -4509,10 +4551,13 @@ async function seedChokepointWarmPing() {
 
 function startChokepointWarmPingLoop() {
   console.log(`[Chokepoints] Warm-ping loop starting (interval ${CHOKEPOINT_WARM_PING_INTERVAL_MS / 1000 / 60}min)`);
-  seedChokepointWarmPing().catch((e) => console.warn('[Chokepoints] Initial warm-ping error:', e?.message || e));
-  setInterval(() => {
-    seedChokepointWarmPing().catch((e) => console.warn('[Chokepoints] Warm-ping error:', e?.message || e));
-  }, CHOKEPOINT_WARM_PING_INTERVAL_MS).unref?.();
+  (async () => {
+    await waitForRpcReady();
+    seedChokepointWarmPing().catch((e) => console.warn('[Chokepoints] Initial warm-ping error:', e?.message || e));
+    setInterval(() => {
+      seedChokepointWarmPing().catch((e) => console.warn('[Chokepoints] Warm-ping error:', e?.message || e));
+    }, CHOKEPOINT_WARM_PING_INTERVAL_MS).unref?.();
+  })().catch((e) => console.warn('[Chokepoints] Warm-up failed:', e?.message || e));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -4521,7 +4566,7 @@ function startChokepointWarmPingLoop() {
 // seed-meta on every live fetch; we just need to call it regularly.
 // ─────────────────────────────────────────────────────────────
 const CABLE_HEALTH_WARM_PING_INTERVAL_MS = 30 * 60 * 1000; // 30 min
-const CABLE_HEALTH_RPC_URL = 'https://api.worldmonitor.app/api/infrastructure/v1/get-cable-health';
+const CABLE_HEALTH_RPC_URL = `${RPC_BASE_URL}/api/infrastructure/v1/get-cable-health`;
 
 async function seedCableHealthWarmPing() {
   try {
@@ -4547,10 +4592,13 @@ async function seedCableHealthWarmPing() {
 
 function startCableHealthWarmPingLoop() {
   console.log(`[CableHealth] Warm-ping loop starting (interval ${CABLE_HEALTH_WARM_PING_INTERVAL_MS / 1000 / 60}min)`);
-  seedCableHealthWarmPing().catch((e) => console.warn('[CableHealth] Initial warm-ping error:', e?.message || e));
-  setInterval(() => {
-    seedCableHealthWarmPing().catch((e) => console.warn('[CableHealth] Warm-ping error:', e?.message || e));
-  }, CABLE_HEALTH_WARM_PING_INTERVAL_MS).unref?.();
+  (async () => {
+    await waitForRpcReady();
+    seedCableHealthWarmPing().catch((e) => console.warn('[CableHealth] Initial warm-ping error:', e?.message || e));
+    setInterval(() => {
+      seedCableHealthWarmPing().catch((e) => console.warn('[CableHealth] Warm-ping error:', e?.message || e));
+    }, CABLE_HEALTH_WARM_PING_INTERVAL_MS).unref?.();
+  })().catch((e) => console.warn('[CableHealth] Warm-up failed:', e?.message || e));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -10575,7 +10623,12 @@ async function handleWidgetAgentRequest(req, res) {
           }
 
           try {
-            const url = new URL(endpoint, 'https://api.worldmonitor.app');
+            // Keep the hosted API origin literal here (post-allowlist) so our
+            // SSRF regression tests can assert ordering. The actual base URL
+            // used for fetch remains RPC_BASE_URL (self-hosted stacks can point
+            // it at localhost/edge).
+            const _HOSTED_WORLD_MONITOR_ORIGIN = 'https://api.worldmonitor.app';
+            const url = new URL(endpoint, `${RPC_BASE_URL}/`);
             for (const [k, v] of Object.entries(params)) {
               url.searchParams.set(k, String(v));
             }

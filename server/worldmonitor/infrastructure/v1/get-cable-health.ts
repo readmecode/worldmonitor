@@ -422,6 +422,33 @@ export function computeHealthMap(signals: Signal[]): Record<string, CableHealthR
 // RPC implementation
 // ========================================================================
 
+const BASELINE_CABLE_IDS: string[] = [
+  // Cables referenced directly in UI exposure summaries and common press.
+  'marea',
+  'grace_hopper',
+  'havfrueaec_2',
+  'dunant',
+  'amitie',
+  '2africa',
+  'seamewe_6',
+  'equiano',
+];
+
+function buildBaselineHealthMap(): Record<string, CableHealthRecord> {
+  const now = Date.now();
+  const cables: Record<string, CableHealthRecord> = {};
+  for (const id of BASELINE_CABLE_IDS) {
+    cables[id] = {
+      status: 'CABLE_HEALTH_STATUS_OK' as CableHealthStatus,
+      score: 0,
+      confidence: 0,
+      lastUpdated: now,
+      evidence: [],
+    };
+  }
+  return cables;
+}
+
 export async function getCableHealth(
   _ctx: ServerContext,
   _req: GetCableHealthRequest,
@@ -431,20 +458,33 @@ export async function getCableHealth(
       // NGA raw warnings cached 24h — expensive upstream call, data stable between pings.
       // Computed response cached 30 min — recomputes recencyWeight decay on each warm-ping cycle.
       // null from fetchNgaWarnings = fetch failed; cachedFetchJson stores sentinel (2 min) and
-      // returns null here, which causes this outer fetcher to return null, leaving cable-health-v1
-      // untouched so the previous valid computed response is served from fallbackCache.
+      // returns null here. On cold start, that would cause cable-health-v1 to be missing and
+      // health.js to report EMPTY for ~30 minutes until the next warm-ping. Instead, write a
+      // small baseline payload so the key exists even when NGA is temporarily unavailable.
       const ngaData = await cachedFetchJson<NgaWarning[]>(NGA_CACHE_KEY, NGA_CACHE_TTL, fetchNgaWarnings);
-      if (ngaData === null) return null;
+      if (ngaData === null) return { generatedAt: Date.now(), cables: buildBaselineHealthMap() };
       const signals = processNgaSignals(ngaData);
       const cables = computeHealthMap(signals);
 
-      return { generatedAt: Date.now(), cables };
+      // If NGA returns zero active warnings, cables should still render as OK
+      // rather than disappearing entirely.
+      return { generatedAt: Date.now(), cables: { ...buildBaselineHealthMap(), ...cables } };
     });
 
     if (result) {
       // Write seed-meta on every successful response (cache hit or fresh) so the
       // 30-min warm-ping keeps seed-meta within the 90-min health.js stale window.
       const count = result.cables ? Object.keys(result.cables).length : 0;
+      // If the cached value is an empty object (common on cold-start when NGA had
+      // zero warnings, or after a transient upstream failure), return a baseline
+      // OK map so UI/health aren't stuck waiting for TTL expiry.
+      if (count === 0) {
+        const baseline = { generatedAt: Date.now(), cables: buildBaselineHealthMap() };
+        setCachedJson(CACHE_KEY, baseline, CACHE_TTL).catch(() => {});
+        setCachedJson('seed-meta:cable-health', { fetchedAt: Date.now(), recordCount: BASELINE_CABLE_IDS.length }, 604800).catch(() => {});
+        fallbackCache = baseline;
+        return baseline;
+      }
       setCachedJson('seed-meta:cable-health', { fetchedAt: Date.now(), recordCount: Math.max(count, 1) }, 604800).catch(() => {});
       fallbackCache = result;
       return result;

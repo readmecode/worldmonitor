@@ -48,6 +48,7 @@ import type { GpsJamHex } from '@/services/gps-interference';
 import { fetchImageryScenes } from '@/services/imagery';
 import type { ImageryScene } from '@/generated/server/worldmonitor/imagery/v1/service_server';
 import type { TrafficAnomaly as ProtoTrafficAnomaly, DdosLocationHit } from '@/generated/client/worldmonitor/infrastructure/v1/service_client';
+import { hasCapability } from '@/services/capabilities';
 import type { DisplacementFlow } from '@/services/displacement';
 import type { Earthquake } from '@/services/earthquakes';
 import type { ClimateAnomaly } from '@/services/climate';
@@ -98,8 +99,7 @@ import type { GulfInvestment } from '@/types';
 import { resolveTradeRouteSegments, TRADE_ROUTES as TRADE_ROUTES_LIST, type TradeRouteSegment, type TradeRouteStatus } from '@/config/trade-routes';
 import type { ScenarioVisualState } from '@/config/scenario-templates';
 import { getLayersForVariant, resolveLayerLabel, bindLayerSearch, type MapVariant } from '@/config/map-layer-definitions';
-import { getAuthState, subscribeAuthState } from '@/services/auth-state';
-import { hasPremiumAccess } from '@/services/panel-gating';
+import { subscribeAuthState } from '@/services/auth-state';
 import { trackGateHit } from '@/services/analytics';
 import { MapPopup, type PopupType } from './MapPopup';
 import type { GetChokepointStatusResponse } from '@/services/supply-chain';
@@ -4142,7 +4142,7 @@ export class DeckGLMap {
 
     if (layerId === 'trade-routes-layer') {
       const segment = info.object as TradeRouteSegment;
-      if (!hasPremiumAccess(getAuthState())) {
+      if (!hasCapability('supply_chain_advanced')) {
         trackGateHit('trade-arc-intel');
         return;
       }
@@ -4420,7 +4420,7 @@ export class DeckGLMap {
     toggles.className = 'layer-toggles deckgl-layer-toggles';
 
     const layerDefs = getLayersForVariant((SITE_VARIANT || 'full') as MapVariant, 'flat');
-    const premiumUnlocked = hasPremiumAccess(getAuthState());
+    const premiumUnlocked = hasCapability('premium_ui');
     const layerConfig = layerDefs.map(def => ({
       key: def.key,
       label: resolveLayerLabel(def, t),
@@ -4460,7 +4460,8 @@ export class DeckGLMap {
     // subscribeAuthState fires the callback synchronously if state is already available,
     // so we defer the self-unsubscribe with queueMicrotask to ensure the assignment completes.
     this._unsubscribeAuthState = subscribeAuthState((state) => {
-      if (!hasPremiumAccess(state)) return;
+      void state;
+      if (!hasCapability('premium_ui')) return;
       toggles.querySelectorAll('.layer-toggle-locked').forEach(label => {
         label.classList.remove('layer-toggle-locked');
         const input = label.querySelector('input') as HTMLInputElement | null;
@@ -5090,12 +5091,12 @@ export class DeckGLMap {
         const waypoints = ROUTE_WAYPOINTS_MAP.get(d.routeId);
         if (waypoints && waypoints.some(wp => scenarioDisrupted.has(wp))) {
           base = scenario;
-        } else if (!hasPremiumAccess(getAuthState())) {
+        } else if (!hasCapability('supply_chain_advanced')) {
           base = active;
         } else {
           base = colorFor(d.status);
         }
-      } else if (!hasPremiumAccess(getAuthState())) {
+      } else if (!hasCapability('supply_chain_advanced')) {
         base = active;
       } else {
         base = colorFor(d.status);
@@ -5128,7 +5129,7 @@ export class DeckGLMap {
     const highRiskColor: [number, number, number, number] = [255, 180, 50, 160];
     const scenarioColor: [number, number, number, number] = [255, 140, 50, 170];
 
-    const isPremium = hasPremiumAccess(getAuthState());
+    const isPremium = hasCapability('supply_chain_advanced');
 
     const scenarioDisrupted = this.scenarioState
       ? new Set(this.scenarioState.disruptedChokepointIds)

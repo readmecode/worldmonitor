@@ -11,6 +11,11 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# Docker images are used for self-hosted distribution by default. This flag is
+# consumed by the Vite build (import.meta.env.VITE_DEPLOYMENT_MODE) so the
+# frontend can hide hosted-only CTAs like Pro banner / Discord widget.
+ENV VITE_DEPLOYMENT_MODE=self_hosted
+
 # Install root dependencies (layer-cached until package.json changes)
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
@@ -67,6 +72,6 @@ EXPOSE 8080
 
 # Healthcheck via nginx
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -qO- http://localhost:8080/api/health || exit 1
+  CMD wget -qO- http://127.0.0.1:8080/api/health || exit 1
 
 CMD ["/app/entrypoint.sh"]

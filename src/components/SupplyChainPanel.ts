@@ -13,8 +13,8 @@ import { t } from '@/services/i18n';
 import { escapeHtml } from '@/utils/sanitize';
 import { isFeatureAvailable } from '@/services/runtime-config';
 import { isDesktopRuntime } from '@/services/runtime';
-import { getAuthState, subscribeAuthState } from '@/services/auth-state';
-import { hasPremiumAccess } from '@/services/panel-gating';
+import { subscribeAuthState } from '@/services/auth-state';
+import { hasCapability } from '@/services/capabilities';
 import { trackGateHit } from '@/services/analytics';
 import { premiumFetch } from '@/services/premium-fetch';
 
@@ -246,12 +246,13 @@ export class SupplyChainPanel extends Panel {
       }
     };
 
-    const isPro = hasPremiumAccess(getAuthState());
+    const isPro = hasCapability('supply_chain_advanced');
     if (!isPro) {
       applyAuthState(false);
       if (this.bypassUnsubscribe) { this.bypassUnsubscribe(); }
       this.bypassUnsubscribe = subscribeAuthState(state => {
-        if (hasPremiumAccess(state)) {
+        void state;
+        if (hasCapability('supply_chain_advanced')) {
           if (this.bypassUnsubscribe) { this.bypassUnsubscribe(); this.bypassUnsubscribe = null; }
           if (!this.content.contains(container)) return;
           container.innerHTML = `<div class="sc-bypass-loading">Loading bypass options\u2026</div>`;
@@ -329,7 +330,7 @@ export class SupplyChainPanel extends Panel {
             tmpl.affectedChokepointIds.includes(cp.id) && tmpl.type !== 'tariff_shock'
           );
           if (!template) return '';
-          const isPro = hasPremiumAccess(getAuthState());
+          const isPro = hasCapability('scenario_engine');
           const btnClass = isPro ? 'sc-scenario-btn' : 'sc-scenario-btn sc-scenario-btn--gated';
           return `<div class="sc-scenario-trigger" data-scenario-id="${escapeHtml(template.id)}" data-chokepoint-id="${escapeHtml(cp.id)}">
             <button class="${btnClass}" ${!isPro ? 'data-gated="1"' : ''} aria-label="Simulate ${escapeHtml(template.name)}">

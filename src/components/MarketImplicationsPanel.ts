@@ -4,7 +4,7 @@ import { escapeHtml } from '@/utils/sanitize';
 import { describeFreshness } from '@/services/persistent-cache';
 import type { MarketImplicationCard, MarketImplicationsData, TransmissionNode } from '@/services/market-implications';
 import { FrameworkSelector } from './FrameworkSelector';
-import { hasPremiumAccess } from '@/services/panel-gating';
+import { hasCapability } from '@/services/capabilities';
 
 const DISCLAIMER = 'AI-generated trade signals for informational purposes only. Not investment advice. Always do your own research.';
 
@@ -76,7 +76,7 @@ export class MarketImplicationsPanel extends Panel {
       infoTooltip: t('components.marketImplications.infoTooltip'),
       premium: 'locked',
     });
-    this.fwSelector = new FrameworkSelector({ panelId: 'market-implications', isPremium: hasPremiumAccess(), panel: this, note: 'Applies to next AI regeneration' });
+    this.fwSelector = new FrameworkSelector({ panelId: 'market-implications', isPremium: hasCapability('advanced_market_analysis'), panel: this, note: 'Applies to next AI regeneration' });
     this.header.appendChild(this.fwSelector.el);
 
     this.content.addEventListener('click', (e) => {

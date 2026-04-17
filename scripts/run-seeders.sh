@@ -12,6 +12,14 @@ export UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+ENV_LOCAL="$PROJECT_DIR/.env.local"
+if [ -f "$ENV_LOCAL" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_LOCAL"
+  set +a
+fi
+
 # Source API keys from docker-compose.override.yml if present.
 # These keys are configured for the container but seeders run on the host.
 OVERRIDE="$PROJECT_DIR/docker-compose.override.yml"

@@ -14,8 +14,8 @@ import { toFlagEmoji } from '@/utils/country-flag';
 import { PORTS } from '@/config/ports';
 import { getChokepointRoutes } from '@/config/trade-routes';
 import { STRATEGIC_WATERWAYS } from '@/config/geo';
+import { hasCapability } from '@/services/capabilities';
 import { hasPremiumAccess } from '@/services/panel-gating';
-import { getAuthState } from '@/services/auth-state';
 import { trackGateHit } from '@/services/analytics';
 import { fetchBypassOptions, fetchChokepointStatus } from '@/services/supply-chain';
 import { haversineDistanceKm } from '@/services/related-assets';
@@ -1700,7 +1700,7 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
     bypassSection.append(bypassHeading);
     const bypassContent = this.el('div');
 
-    const isPro = hasPremiumAccess(getAuthState());
+    const isPro = hasCapability('supply_chain_advanced');
     if (!isPro) {
       const gateEl = this.makeProLocked('Bypass corridors available with PRO');
       gateEl.addEventListener('click', () => trackGateHit('sector-bypass-corridors'), { once: true });
@@ -2229,7 +2229,7 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
     this.tradeExposureBody = tradeBody;
     tradeBody.append(this.makeLoading('Loading trade exposure\u2026'));
 
-    const isPro = hasPremiumAccess(getAuthState());
+    const isPro = hasPremiumAccess();
 
     const [costShockCalcCard, costShockCalcBody] = this.sectionCard(
       'Cost Shock Calculator',

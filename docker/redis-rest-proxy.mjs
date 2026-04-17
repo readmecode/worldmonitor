@@ -64,7 +64,10 @@ async function runCommand(args) {
   return client.sendCommand([cmd, ...cmdArgs.map(String)]);
 }
 
-const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
+// Large self-hosted seed payloads (for example sanctions entity indexes) can
+// legitimately exceed 1 MB. Keep a conservative cap, but high enough to avoid
+// TCP resets on valid writes through the proxy.
+const MAX_BODY_BYTES = 16 * 1024 * 1024; // 16 MB
 
 async function readBody(req) {
   const chunks = [];
@@ -72,8 +75,7 @@ async function readBody(req) {
   for await (const chunk of req) {
     totalLength += chunk.length;
     if (totalLength > MAX_BODY_BYTES) {
-      req.destroy();
-      throw new Error('Request body too large');
+      throw new Error(`Request body too large (${totalLength} > ${MAX_BODY_BYTES})`);
     }
     chunks.push(chunk);
   }
@@ -186,6 +188,18 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(500);
     res.end(JSON.stringify({ error: err.message }));
   }
+});
+
+// Be conservative with Node HTTP timeouts: large seed writes (multi-MB JSON)
+// can take a few seconds on under-provisioned hosts. Cutting these requests
+// off yields undici "socket hang up" on the caller.
+server.keepAliveTimeout = 70_000;
+server.headersTimeout = 75_000;
+server.requestTimeout = 0;
+
+// Avoid process-level crashes on malformed HTTP from clients.
+server.on('clientError', (_err, socket) => {
+  try { socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'); } catch { /* ignore */ }
 });
 
 server.listen(PORT, '0.0.0.0', () => {

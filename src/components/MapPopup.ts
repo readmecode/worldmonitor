@@ -22,8 +22,7 @@ import { getHotspotEscalation, getEscalationChange24h } from '@/services/hotspot
 import { getCableHealthRecord } from '@/services/cable-health';
 import { nameToCountryCode } from '@/services/country-geometry';
 import { sparkline } from '@/utils/sparkline';
-import { getAuthState } from '@/services/auth-state';
-import { hasPremiumAccess } from '@/services/panel-gating';
+import { hasCapability } from '@/services/capabilities';
 import { trackGateHit } from '@/services/analytics';
 
 // ── Static HS2 sector breakdown per chokepoint ────────────────────────────────
@@ -277,7 +276,7 @@ export class MapPopup {
         this.transitChart.mount(chartEl, cp.transitSummary.history);
       }
       // Track PRO gate impression for transit chart
-      if (cp?.transitSummary?.history?.length && !hasPremiumAccess(getAuthState())) {
+      if (cp?.transitSummary?.history?.length && !hasCapability('supply_chain_advanced')) {
         trackGateHit('chokepoint-transit-chart');
       }
 
@@ -287,7 +286,7 @@ export class MapPopup {
         const ringEl = this.popup.querySelector<HTMLElement>(`[data-hs2-ring="${waterway.chokepointId}"]`);
         if (ringEl) {
           new HS2RingChart().mount(ringEl, sectors);
-        } else if (!hasPremiumAccess(getAuthState())) {
+        } else if (!hasCapability('supply_chain_advanced')) {
           trackGateHit('chokepoint-sector-ring');
         }
       }
@@ -1294,7 +1293,7 @@ export class MapPopup {
       c => c.id === waterway.chokepointId,
     );
     const hasChart = !!(cp?.transitSummary?.history?.length);
-    const isPro = hasPremiumAccess(getAuthState());
+    const isPro = hasCapability('supply_chain_advanced');
     const sectors = CHOKEPOINT_HS2_SECTORS[waterway.chokepointId];
 
     // Sector mix: only show the compact SVG ring for free users (PRO users get the full HS2RingChart below)

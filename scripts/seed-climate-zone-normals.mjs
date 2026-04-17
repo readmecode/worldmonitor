@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { loadEnvFile, runSeed, sleep } from './_seed-utils.mjs';
+import { getRedisCredentials, loadEnvFile, runSeed, sleep } from './_seed-utils.mjs';
 import { CLIMATE_ZONES, MIN_CLIMATE_ZONE_COUNT, hasRequiredClimateZones } from './_climate-zones.mjs';
 import { chunkItems, fetchOpenMeteoArchiveBatch } from './_open-meteo-archive.mjs';
 
@@ -11,8 +11,8 @@ export const CLIMATE_ZONE_NORMALS_KEY = 'climate:zone-normals:v1';
 const NORMALS_TTL = 95 * 24 * 60 * 60; // 95 days = >3x a 31-day monthly interval
 const NORMALS_START = '1991-01-01';
 const NORMALS_END = '2020-12-31';
-const NORMALS_BATCH_SIZE = 2;
-const NORMALS_BATCH_DELAY_MS = 3_000;
+const NORMALS_BATCH_SIZE = 1;
+const NORMALS_BATCH_DELAY_MS = 5_000;
 
 function round(value, decimals = 2) {
   const scale = 10 ** decimals;
@@ -92,6 +92,22 @@ export function buildZoneNormalsFromBatch(zones, batchPayloads) {
   });
 }
 
+async function readExistingNormals() {
+  const { url, token } = getRedisCredentials();
+  const resp = await fetch(`${url}/get/${encodeURIComponent(CLIMATE_ZONE_NORMALS_KEY)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  if (!data?.result) return null;
+  try {
+    return JSON.parse(data.result);
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchClimateZoneNormals() {
   const normals = [];
   let failures = 0;
@@ -115,6 +131,18 @@ export async function fetchClimateZoneNormals() {
       failures += batch.length;
     }
     await sleep(NORMALS_BATCH_DELAY_MS);
+  }
+
+  if (normals.length < MIN_CLIMATE_ZONE_COUNT || !hasRequiredClimateZones(normals, (zone) => zone.zone)) {
+    const existing = await readExistingNormals().catch(() => null);
+    if (validate(existing)) {
+      console.warn(`  [CLIMATE_NORMALS] Falling back to cached baseline after Open-Meteo throttling (${normals.length}/${CLIMATE_ZONES.length} fresh zones, ${failures} failures)`);
+      return {
+        ...existing,
+        fetchedAt: Date.now(),
+        fallback: 'cached-baseline',
+      };
+    }
   }
 
   if (normals.length < MIN_CLIMATE_ZONE_COUNT) {

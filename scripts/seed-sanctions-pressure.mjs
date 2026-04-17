@@ -566,32 +566,37 @@ runSeed('sanctions', 'pressure', CANONICAL_KEY, fetchSanctionsPressure, {
       ttl: CACHE_TTL,
       transform: (data) => data._state,
     },
-    {
-      key: COUNTRY_COUNTS_KEY,
-      ttl: CACHE_TTL,
-      transform: (data) => data._countryCounts,
-    },
   ],
   afterPublish: async (data, _ctx) => {
     // Write entity lookup index with seed-meta so health.js can monitor it.
     // Uses writeExtraKeyWithMeta rather than extraKeys because runSeed's extraKeys
     // calls writeExtraKey (no meta), and we need a seed-meta key for health tracking.
     if (data._entityIndex) {
-      await writeExtraKeyWithMeta(
-        ENTITY_INDEX_KEY,
-        data._entityIndex,
-        CACHE_TTL,
-        data._entityIndex.length,
-      );
+      try {
+        await writeExtraKeyWithMeta(
+          ENTITY_INDEX_KEY,
+          data._entityIndex,
+          CACHE_TTL,
+          data._entityIndex.length,
+        );
+      } catch (err) {
+        // Best-effort: the primary sanctions:pressure key is already published.
+        // Avoid failing the entire seed (which would leave seed-meta stale).
+        console.warn(`  WARNING: entity index write failed (${err?.message || err})`);
+      }
     }
     // Write full ISO2→count map for per-country sanctions lookup (no top-12 truncation).
     if (data._countryCounts) {
-      await writeExtraKeyWithMeta(
-        COUNTRY_COUNTS_KEY,
-        data._countryCounts,
-        CACHE_TTL,
-        Object.keys(data._countryCounts).length,
-      );
+      try {
+        await writeExtraKeyWithMeta(
+          COUNTRY_COUNTS_KEY,
+          data._countryCounts,
+          CACHE_TTL,
+          Object.keys(data._countryCounts).length,
+        );
+      } catch (err) {
+        console.warn(`  WARNING: country-counts write failed (${err?.message || err})`);
+      }
     }
     delete data._state;
     delete data._entityIndex;

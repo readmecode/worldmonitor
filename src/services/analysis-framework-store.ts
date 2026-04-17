@@ -1,5 +1,6 @@
 import { loadFromStorage, saveToStorage } from '@/utils';
-import { hasPremiumAccess } from './panel-gating';
+import type { Capability } from '@/shared/capabilities';
+import { hasCapability } from './capabilities';
 
 const LIBRARY_KEY = 'wm-analysis-frameworks';
 const PANEL_KEY = 'wm-panel-frameworks';
@@ -13,6 +14,14 @@ export type AnalysisPanelId =
   | 'daily-market-brief'
   | 'deduction'
   | 'market-implications';
+
+const PANEL_FRAMEWORK_CAPABILITY: Record<AnalysisPanelId, Capability> = {
+  insights: 'premium_ui',
+  'country-brief': 'premium_ui',
+  'daily-market-brief': 'advanced_market_analysis',
+  deduction: 'regional_intelligence',
+  'market-implications': 'advanced_market_analysis',
+};
 
 export interface AnalysisFramework {
   id: string;
@@ -145,7 +154,7 @@ export function renameImportedFramework(id: string, name: string): void {
 }
 
 export function getActiveFrameworkForPanel(panelId: AnalysisPanelId): AnalysisFramework | null {
-  if (!hasPremiumAccess()) return null;
+  if (!hasCapability(PANEL_FRAMEWORK_CAPABILITY[panelId])) return null;
   if (_activeCache.has(panelId)) return _activeCache.get(panelId)!;
   const selections = loadFromStorage<Record<string, string | null>>(PANEL_KEY, {});
   const frameworkId = selections[panelId] ?? null;

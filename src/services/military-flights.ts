@@ -95,43 +95,49 @@ interface MilitaryFlightsResponse {
 }
 
 async function fetchFromRedis(): Promise<MilitaryFlight[]> {
-  const resp = await fetch(toApiUrl('/api/military-flights'), {
-    headers: { Accept: 'application/json' },
-  });
-  if (!resp.ok) {
-    throw new Error(`military-flights API ${resp.status}`);
-  }
-  const data: MilitaryFlightsResponse = await resp.json();
-  if (!data.flights || data.flights.length === 0) {
-    throw new Error('No flights returned — upstream may be down');
-  }
+  try {
+    const resp = await fetch(toApiUrl('/api/military-flights'), {
+      headers: { Accept: 'application/json' },
+    });
+    if (!resp.ok) {
+      throw new Error(`military-flights API ${resp.status}`);
+    }
+    const data: MilitaryFlightsResponse = await resp.json();
+    if (!data.flights || data.flights.length === 0) {
+      throw new Error('No flights returned — upstream may be down');
+    }
 
-  const now = new Date();
-  return data.flights.map((f) => {
-    const positions = upsertFlightHistory(f.hexCode.toLowerCase(), f.lat, f.lon);
+    const now = new Date();
+    return data.flights.map((f) => {
+      const positions = upsertFlightHistory(f.hexCode.toLowerCase(), f.lat, f.lon);
 
-    return {
-      id: f.id,
-      callsign: f.callsign,
-      hexCode: f.hexCode,
-      aircraftType: f.aircraftType,
-      operator: f.operator,
-      operatorCountry: f.operatorCountry,
-      lat: f.lat,
-      lon: f.lon,
-      altitude: f.altitude,
-      heading: f.heading,
-      speed: f.speed,
-      verticalRate: f.verticalRate,
-      onGround: f.onGround,
-      squawk: f.squawk,
-      lastSeen: f.lastSeenMs ? new Date(f.lastSeenMs) : now,
-      track: positions.length > 1 ? [...positions] : undefined,
-      confidence: f.confidence,
-      isInteresting: f.isInteresting,
-      note: f.note,
-    } satisfies MilitaryFlight;
-  });
+      return {
+        id: f.id,
+        callsign: f.callsign,
+        hexCode: f.hexCode,
+        aircraftType: f.aircraftType,
+        operator: f.operator,
+        operatorCountry: f.operatorCountry,
+        lat: f.lat,
+        lon: f.lon,
+        altitude: f.altitude,
+        heading: f.heading,
+        speed: f.speed,
+        verticalRate: f.verticalRate,
+        onGround: f.onGround,
+        squawk: f.squawk,
+        lastSeen: f.lastSeenMs ? new Date(f.lastSeenMs) : now,
+        track: positions.length > 1 ? [...positions] : undefined,
+        confidence: f.confidence,
+        isInteresting: f.isInteresting,
+        note: f.note,
+      } satisfies MilitaryFlight;
+    });
+  } catch {
+    // Local self-hosted stacks often do not run the legacy military-flights
+    // seeder, but the relay/OpenSky path is still available.
+    return fetchFromOpenSky();
+  }
 }
 
 // ─── Desktop-only: OpenSky direct path ────────────────────────

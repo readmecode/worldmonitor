@@ -2,6 +2,7 @@ import { DEFAULT_UPGRADE_PRODUCT } from '@/config/products';
 import { type AuthSession, getAuthState, subscribeAuthState } from '@/services/auth-state';
 import { openSignIn } from '@/services/clerk';
 import { PanelGateReason, getPanelGateReason } from '@/services/panel-gating';
+import { hasCapability } from '@/services/capabilities';
 import { getResilienceScore, type ResilienceDomain, type ResilienceScoreResponse } from '@/services/resilience';
 import { isDesktopRuntime } from '@/services/runtime';
 import { invokeTauri } from '@/services/tauri-bridge';
@@ -134,6 +135,7 @@ export class ResilienceWidget {
   }
 
   private getGateReason(): PanelGateReason {
+    if (hasCapability('resilience')) return PanelGateReason.NONE;
     return getPanelGateReason(this.authState, true);
   }
 

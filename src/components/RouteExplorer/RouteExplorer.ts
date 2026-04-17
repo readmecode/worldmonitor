@@ -27,8 +27,7 @@ import {
 } from './url-state';
 import type { GetRouteExplorerLaneResponse, GetRouteImpactResponse, BypassCorridorOption } from '@/generated/server/worldmonitor/supply_chain/v1/service_server';
 import { fetchRouteExplorerLane, fetchRouteImpact } from '@/services/supply-chain';
-import { hasPremiumAccess } from '@/services/panel-gating';
-import { getAuthState } from '@/services/auth-state';
+import { hasCapability } from '@/services/capabilities';
 import { trackGateHit, track, type UmamiEvent } from '@/services/analytics';
 
 import { TRADE_ROUTES } from '@/config/trade-routes';
@@ -209,7 +208,7 @@ export class RouteExplorer {
 
   private async fetchLane(): Promise<void> {
     if (!this.isQueryComplete()) return;
-    if (!hasPremiumAccess(getAuthState())) {
+    if (!hasCapability('supply_chain_advanced')) {
       this.generationId++;
       this.displayMode = 'gate';
       this.resetLaneState('gate');
@@ -686,7 +685,7 @@ export class RouteExplorer {
   // ─── Analytics ─────────────────────────────────────────────────────────
 
   private get tier(): 'pro' | 'free' {
-    return hasPremiumAccess(getAuthState()) ? 'pro' : 'free';
+    return hasCapability('supply_chain_advanced') ? 'pro' : 'free';
   }
 
   private trackEvent(event: UmamiEvent, props?: Record<string, unknown>): void {
