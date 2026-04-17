@@ -23,7 +23,9 @@ const ET_CODE = {
   SANCTIONS_ENTITY_TYPE_ENTITY: 'entity',
 };
 const DEFAULT_RECENT_LIMIT = 60;
-const OFAC_TIMEOUT_MS = 45_000;
+// OFAC SDN advanced XML is ~120MB; 45s was frequently too tight on home/office
+// networks, causing the seed to "fail gracefully" and leaving seed-meta stale.
+const OFAC_TIMEOUT_MS = 120_000;
 const PROGRAM_CODE_RE = /^[A-Z0-9][A-Z0-9-]{1,24}$/;
 
 const OFAC_SOURCES = [
@@ -554,6 +556,10 @@ runSeed('sanctions', 'pressure', CANONICAL_KEY, fetchSanctionsPressure, {
   validateFn: validate,
   sourceVersion: 'ofac-sls-advanced-xml-v1',
   recordCount: (data) => data.totalCount ?? 0,
+  // When upstream OFAC times out, runSeed extends TTL on canonicalKey + extraKeys.
+  // Keep dependent lookup keys alive too so health doesn't flip to EMPTY while
+  // pressure itself remains cached.
+  failureExtendKeys: [ENTITY_INDEX_KEY, COUNTRY_COUNTS_KEY],
   // Strip internal-only fields before writing the main key so the pressure payload
   // does not include the entity index (~hundreds of KB) or state snapshot.
   publishTransform: (data) => {

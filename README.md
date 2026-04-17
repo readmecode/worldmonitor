@@ -99,6 +99,13 @@ Run:
 
 It prints container status, `GET /api/health`, and key endpoint samples in one paste-friendly output.
 
+### Interpreting `/api/health`
+
+- `EMPTY_ON_DEMAND`: expected when a provider API key is not configured (self-hosted degrades to best-effort).
+- `STALE_SEED` (warn): the seeder ran before but couldn’t refresh due to an upstream timeout/rate-limit; the stack keeps serving cached data.
+- If `sanctionsEntities: EMPTY` or `economicStress: EMPTY` shows up, it usually means a dependent seed key expired between runs. Rebuild/restart the stack (`docker compose up -d --build`) so the seed-worker repopulates those keys.
+- If Docker starts returning `EOF` / `unexpected end of JSON input` for compose commands, restart Docker Desktop and rerun `docker compose up -d --build`.
+
 ### Notes
 
 - The stack degrades gracefully when provider keys are missing; many checks surface as `EMPTY_ON_DEMAND` (warn) rather than critical failures.
