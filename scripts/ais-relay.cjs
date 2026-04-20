@@ -10632,8 +10632,14 @@ async function handleWidgetAgentRequest(req, res) {
             for (const [k, v] of Object.entries(params)) {
               url.searchParams.set(k, String(v));
             }
+            const headers = { 'User-Agent': 'WorldMonitor-WidgetAgent/1.0' };
+            // Self-hosted: allow the widget-agent to call premium RPCs against the local stack.
+            // Never forward the local key to the hosted API.
+            const wmKey = (process.env.WORLDMONITOR_API_KEY || '').trim();
+            const isHostedRpc = RPC_BASE_URL.startsWith('https://api.worldmonitor.app');
+            if (wmKey && !isHostedRpc) headers['X-WorldMonitor-Key'] = wmKey;
             const dataRes = await fetch(url.toString(), {
-              headers: { 'User-Agent': 'WorldMonitor-WidgetAgent/1.0' },
+              headers,
               signal: AbortSignal.timeout(15_000),
             });
             const data = await dataRes.text();

@@ -48,6 +48,9 @@ Create a `docker-compose.override.yml` to inject your keys. This file is **gitig
 services:
   worldmonitor:
     environment:
+      # 🧩 PRO widget builder (/api/widget-agent). Required for the widget agent to generate HTML.
+      ANTHROPIC_API_KEY: ""       # https://console.anthropic.com
+
       # 🤖 LLM — pick one or both (used for intelligence assessments)
       GROQ_API_KEY: ""            # https://console.groq.com (free, 14.4K req/day)
       OPENROUTER_API_KEY: ""      # https://openrouter.ai (free, 50 req/day)
@@ -80,7 +83,14 @@ services:
   ais-relay:
     environment:
       AISSTREAM_API_KEY: ""       # same key as above — relay needs it too
+      ANTHROPIC_API_KEY: ""       # required for /widget-agent (PRO widget builder)
+      # Ensure relay tools call your self-hosted stack (not the hosted API).
+      WORLDMONITOR_RPC_BASE_URL: "http://worldmonitor:8080"
 ```
+
+### PRO Widget Builder Notes
+
+The PRO widget builder runs through `/api/widget-agent` and streams events (SSE). In self-hosted mode you should not need to set `wm-pro-key` in your browser localStorage; configure `ANTHROPIC_API_KEY` server-side instead. If you expose the relay publicly, also set custom `WIDGET_AGENT_KEY` / `PRO_WIDGET_KEY` values (compose defaults are intentionally simple).
 
 ### 💰 Free vs Paid
 

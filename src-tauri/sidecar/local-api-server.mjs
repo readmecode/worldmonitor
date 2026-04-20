@@ -6,6 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { brotliCompress, gzipSync } from 'node:zlib';
+import { Readable } from 'node:stream';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -1466,7 +1467,6 @@ export async function createLocalApiServer(options = {}) {
     try {
       const response = await dispatch(requestUrl, req, routes, context);
       const durationMs = Date.now() - start;
-      let body = Buffer.from(await response.arrayBuffer());
       const headers = Object.fromEntries(response.headers.entries());
       const corsOrigin = getSidecarCorsOrigin(req);
       headers['access-control-allow-origin'] = corsOrigin;
@@ -1482,6 +1482,33 @@ export async function createLocalApiServer(options = {}) {
         });
       }
 
+      // Streaming responses (SSE) must NOT be buffered or compressed; doing so
+      // breaks incremental delivery and can cause upstream timeouts (504).
+      const contentType = String(headers['content-type'] || headers['Content-Type'] || '');
+      const isEventStream = /text\/event-stream/i.test(contentType);
+      if (isEventStream) {
+        delete headers['content-length'];
+        res.writeHead(response.status, headers);
+        if (!response.body) {
+          res.end();
+          return;
+        }
+        const stream = Readable.fromWeb(response.body);
+        const onClose = () => {
+          try { stream.destroy(); } catch { /* ignore */ }
+          try { response.body.cancel(); } catch { /* ignore */ }
+        };
+        req.on('close', onClose);
+        res.on('close', onClose);
+        stream.on('error', (err) => {
+          context.logger.warn('[local-api] stream error', err);
+          try { res.end(); } catch { /* ignore */ }
+        });
+        stream.pipe(res);
+        return;
+      }
+
+      let body = Buffer.from(await response.arrayBuffer());
       const acceptEncoding = req.headers['accept-encoding'] || '';
       body = await maybeCompressResponseBody(body, headers, acceptEncoding);
 
