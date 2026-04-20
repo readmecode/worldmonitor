@@ -22,6 +22,7 @@ import { getCachedJson, setCachedJson } from './redis';
 
 const ACLED_TOKEN_URL = 'https://acleddata.com/oauth/token';
 const ACLED_CLIENT_ID = 'acled';
+const ACLED_COOKIE_LOGIN_URL = 'https://acleddata.com/user/login?_format=json';
 
 /** Refresh 5 minutes before the token actually expires. */
 const EXPIRY_MARGIN_MS = 5 * 60 * 1000;
@@ -31,6 +32,15 @@ const REDIS_CACHE_KEY = 'acled:oauth:token';
 
 /** Cache token in Redis for 23 hours (token lasts 24 h, minus margin). */
 const REDIS_TTL_SECONDS = 23 * 60 * 60;
+
+/** Redis cache key for ACLED cookie session (fallback auth). */
+const REDIS_COOKIE_KEY = 'acled:cookie:session';
+
+/**
+ * Cookie sessions can be short-lived / invalidated server-side.
+ * Keep TTL modest so we auto-heal if ACLED rotates session secrets.
+ */
+const REDIS_COOKIE_TTL_SECONDS = 6 * 60 * 60;
 
 interface TokenState {
   accessToken: string;
@@ -45,12 +55,126 @@ interface AcledOAuthTokenResponse {
   expires_in?: number;
 }
 
+interface AcledCookieSessionState {
+  cookieHeader: string;
+  refreshAt: number;
+}
+
 /**
  * In-memory fast-path cache.
  * Acts as L1 cache; Redis is L2 and survives Vercel Edge cold starts.
  */
 let memCached: TokenState | null = null;
 let refreshPromise: Promise<string | null> | null = null;
+let memCookie: AcledCookieSessionState | null = null;
+let cookieLoginPromise: Promise<string | null> | null = null;
+
+function extractSetCookies(resp: Response): string[] {
+  // Node/undici provides getSetCookie(); Edge/Web doesn't. Support both.
+  const hdrs = resp.headers as unknown as { getSetCookie?: () => string[] };
+  if (typeof hdrs.getSetCookie === 'function') return hdrs.getSetCookie();
+
+  const raw = resp.headers.get('set-cookie');
+  if (!raw) return [];
+  return [raw];
+}
+
+function buildCookieHeader(setCookies: string[]): string | null {
+  const parts: string[] = [];
+  for (const c of setCookies) {
+    const nv = c.split(';')[0]?.trim();
+    if (nv) parts.push(nv);
+  }
+  return parts.length > 0 ? parts.join('; ') : null;
+}
+
+async function loginCookieSession(email: string, password: string): Promise<AcledCookieSessionState> {
+  const resp = await fetch(ACLED_COOKIE_LOGIN_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'User-Agent': CHROME_UA,
+    },
+    body: JSON.stringify({ name: email, pass: password }),
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`ACLED cookie login failed (${resp.status}): ${text.slice(0, 200)}`);
+  }
+
+  const cookieHeader = buildCookieHeader(extractSetCookies(resp));
+  if (!cookieHeader) throw new Error('ACLED cookie login missing Set-Cookie header');
+
+  return {
+    cookieHeader,
+    refreshAt: Date.now() + (REDIS_COOKIE_TTL_SECONDS - 5 * 60) * 1000,
+  };
+}
+
+async function cacheCookieToRedis(state: AcledCookieSessionState): Promise<void> {
+  try {
+    await setCachedJson(REDIS_COOKIE_KEY, state, REDIS_COOKIE_TTL_SECONDS);
+  } catch (err) {
+    console.warn('[acled-auth] Failed to cache cookie session in Redis', err);
+  }
+}
+
+async function restoreCookieFromRedis(): Promise<AcledCookieSessionState | null> {
+  try {
+    const data = await getCachedJson(REDIS_COOKIE_KEY);
+    if (
+      data &&
+      typeof data === 'object' &&
+      'cookieHeader' in (data as Record<string, unknown>) &&
+      'refreshAt' in (data as Record<string, unknown>)
+    ) {
+      return data as AcledCookieSessionState;
+    }
+  } catch (err) {
+    console.warn('[acled-auth] Failed to restore cookie session from Redis', err);
+  }
+  return null;
+}
+
+/**
+ * Returns an ACLED cookie header string (e.g. `SESS...=...; SSESS...=...`) or null.
+ *
+ * This is a fallback for cases where OAuth is configured but the dataset
+ * endpoint rejects Bearer tokens (403) while allowing logged-in sessions.
+ */
+export async function getAcledCookieHeader(): Promise<string | null> {
+  const email = process.env.ACLED_EMAIL?.trim();
+  const password = process.env.ACLED_PASSWORD?.trim();
+  if (!email || !password) return null;
+
+  if (memCookie && Date.now() < memCookie.refreshAt) return memCookie.cookieHeader;
+
+  const fromRedis = await restoreCookieFromRedis();
+  if (fromRedis && Date.now() < fromRedis.refreshAt) {
+    memCookie = fromRedis;
+    return memCookie.cookieHeader;
+  }
+  if (fromRedis) memCookie = fromRedis;
+
+  if (cookieLoginPromise) return cookieLoginPromise;
+  cookieLoginPromise = (async () => {
+    try {
+      memCookie = await loginCookieSession(email, password);
+      await cacheCookieToRedis(memCookie);
+      return memCookie.cookieHeader;
+    } catch (err) {
+      console.error('[acled-auth] Failed to obtain ACLED cookie session', err);
+      return memCookie?.cookieHeader ?? null;
+    } finally {
+      cookieLoginPromise = null;
+    }
+  })();
+
+  return cookieLoginPromise;
+}
 
 async function requestAcledToken(
   body: URLSearchParams,

@@ -8,6 +8,23 @@
 
 const ACLED_TOKEN_URL = 'https://acleddata.com/oauth/token';
 const ACLED_CLIENT_ID = 'acled';
+const ACLED_COOKIE_LOGIN_URL = 'https://acleddata.com/user/login?_format=json';
+
+function extractSetCookies(resp) {
+  // Node/undici may expose getSetCookie(); fall back to standard header.
+  if (resp?.headers && typeof resp.headers.getSetCookie === 'function') return resp.headers.getSetCookie();
+  const raw = resp?.headers?.get?.('set-cookie');
+  return raw ? [raw] : [];
+}
+
+function buildCookieHeader(setCookies) {
+  const parts = [];
+  for (const c of setCookies || []) {
+    const nv = String(c).split(';')[0]?.trim();
+    if (nv) parts.push(nv);
+  }
+  return parts.length ? parts.join('; ') : null;
+}
 
 /**
  * Obtain a valid ACLED access token.
@@ -65,4 +82,32 @@ export async function getAcledToken({ userAgent } = {}) {
   }
 
   return null;
+}
+
+/**
+ * Cookie-based auth fallback (per ACLED docs).
+ * Returns a `Cookie` header value like `SESS...=...; SSESS...=...`, or null.
+ */
+export async function getAcledCookieHeader({ userAgent } = {}) {
+  const email = (process.env.ACLED_EMAIL || '').trim();
+  const password = (process.env.ACLED_PASSWORD || '').trim();
+  if (!email || !password) return null;
+
+  const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+  if (userAgent) headers['User-Agent'] = userAgent;
+
+  const resp = await fetch(ACLED_COOKIE_LOGIN_URL, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ name: email, pass: password }),
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    console.warn(`  ACLED cookie login failed (${resp.status}): ${text.slice(0, 200)}`);
+    return null;
+  }
+
+  return buildCookieHeader(extractSetCookies(resp));
 }

@@ -11,19 +11,51 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
-import { dirname, resolve, basename } from 'node:path';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 
+function listScriptsTree() {
+  const out = new Set();
+  const scriptsRoot = resolve(root, 'scripts');
+  const walk = (dir) => {
+    for (const ent of readdirSync(dir)) {
+      const abs = resolve(dir, ent);
+      const st = statSync(abs);
+      if (st.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      const rel = abs.startsWith(root + '/') ? abs.slice(root.length + 1) : null;
+      if (!rel || !rel.startsWith('scripts/')) continue;
+      // Keep in sync with what scripts can import at runtime.
+      // JSON is used as data inputs by several seed scripts.
+      if (/\.(mjs|cjs|js|json)$/.test(rel)) out.add(rel);
+    }
+  };
+  walk(scriptsRoot);
+  return out;
+}
+
 function readCopyList(dockerfilePath) {
   const src = readFileSync(dockerfilePath, 'utf-8');
   const copied = new Set();
+
   // Matches: COPY scripts/foo.mjs ./scripts/foo.mjs
-  const re = /^COPY\s+(scripts\/[^\s]+\.(mjs|cjs))\s+/gm;
+  const re = /^COPY\s+(scripts\/[^\s]+\.(mjs|cjs|js|json))\s+/gm;
   for (const m of src.matchAll(re)) copied.add(m[1]);
+
+  // If the Dockerfile COPYs the entire scripts/ tree, treat all scripts/*
+  // as included. Self-hosted seed-worker runs inside the relay image and
+  // needs access to many seed scripts beyond the relay entrypoint.
+  const copiesAllScripts = /^COPY\s+scripts\/\s+\.\/*scripts\/\s*$/m.test(src);
+  if (copiesAllScripts) {
+    for (const p of listScriptsTree()) copied.add(p);
+  }
+
   return copied;
 }
 
@@ -56,7 +88,7 @@ function resolveImport(fromFile, relImport) {
 describe('Dockerfile.relay — transitive-import closure', () => {
   const dockerfile = resolve(root, 'Dockerfile.relay');
   const copied = readCopyList(dockerfile);
-  const entrypoints = [...copied].filter(p => p.endsWith('.mjs') || p.endsWith('.cjs'));
+  const entrypoints = [...copied].filter((p) => p.endsWith('.mjs') || p.endsWith('.cjs'));
 
   it('COPY list is non-empty (sanity)', () => {
     assert.ok(copied.size > 0, 'Dockerfile.relay has no COPY scripts/*.mjs|cjs lines');
@@ -81,10 +113,10 @@ describe('Dockerfile.relay — transitive-import closure', () => {
 
   // BFS the import graph from each COPY'd entrypoint. Every .mjs/.cjs reached
   // via a relative import must itself be COPY'd.
-  it('every transitively-imported scripts/*.mjs|cjs is also COPY\'d', () => {
+  it("every transitively-imported scripts/*.mjs|cjs is also COPY'd", () => {
     const missing = [];
     const visited = new Set();
-    const queue = entrypoints.map(p => resolve(root, p));
+    const queue = entrypoints.map((p) => resolve(root, p));
     while (queue.length) {
       const file = queue.shift();
       if (visited.has(file)) continue;
@@ -105,7 +137,7 @@ describe('Dockerfile.relay — transitive-import closure', () => {
       missing,
       [],
       `Dockerfile.relay is missing COPY lines for:\n  ${missing.join('\n  ')}\n` +
-      `Add a 'COPY <path> ./<path>' line per missing file.`,
+        `Add a 'COPY <path> ./<path>' line per missing file.`,
     );
   });
 });

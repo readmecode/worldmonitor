@@ -89,6 +89,25 @@ Open:
 - App: http://localhost:3000
 - Health: http://localhost:3000/api/health
 
+### API Keys (Self-Hosted)
+
+Self-hosting works without any keys, but these unlock the “non-empty” experience (and reduce `EMPTY` / `STALE_SEED` in `/api/health`):
+
+- `ACLED_EMAIL`, `ACLED_PASSWORD`: ACLED conflict/unrest + risk score inputs. (If ACLED returns `403` even after OAuth, self-host now retries with cookie-based auth; if it still fails your account likely doesn’t have API access enabled.)
+- `NASA_FIRMS_API_KEY`: Wildfires (NASA FIRMS).
+- `OPENAQ_API_KEY`: Air quality (OpenAQ v3). Optional supplement: `WAQI_API_KEY`.
+- `EIA_API_KEY`: US energy (EIA fuel prices, inventories).
+- `FRED_API_KEY`: US macro series + release calendar.
+- `FINNHUB_API_KEY`: Earnings calendar (optional).
+- `AISSTREAM_API_KEY`: Live AIS ship positions.
+- `OPENSKY_CLIENT_ID`, `OPENSKY_CLIENT_SECRET`: Authenticated OpenSky feeds (improves aviation / theater posture).
+
+Optional / advanced:
+
+- `UCDP_ACCESS_TOKEN`: UCDP conflict event feeds.
+- `CLOUDFLARE_API_TOKEN`: Internet outage checks.
+- `OPENROUTER_API_KEY` or `LLM_API_URL`+`LLM_API_KEY`: LLM enrichment (if you don’t want Groq/Ollama).
+
 ### Diagnosing Self-Hosted Issues
 
 Run:
@@ -98,6 +117,7 @@ Run:
 ```
 
 It prints container status, `GET /api/health`, and key endpoint samples in one paste-friendly output.
+It also runs a safe `.env.local` sanity check (prints key names only, never values).
 
 ### Interpreting `/api/health`
 
