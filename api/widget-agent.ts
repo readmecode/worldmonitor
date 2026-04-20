@@ -21,7 +21,15 @@ export const config = { runtime: 'edge' };
 import { getCorsHeaders } from './_cors.js';
 import { validateBearerToken } from '../server/auth-session';
 
-const RELAY_BASE = 'https://proxy.worldmonitor.app';
+function getRelayBase(): string {
+  // Self-hosted: proxy to the local relay container (ais-relay) instead of the public proxy.
+  // docker-compose sets WS_RELAY_URL=http://ais-relay:3004
+  const selfHostedRelay = (process.env.WIDGET_AGENT_RELAY_BASE || process.env.WS_RELAY_URL || '').trim();
+  if (selfHostedRelay) return selfHostedRelay.replace(/\/$/, '');
+  return 'https://proxy.worldmonitor.app';
+}
+
+const RELAY_BASE = getRelayBase();
 const WIDGET_AGENT_KEY = process.env.WIDGET_AGENT_KEY ?? '';
 const PRO_WIDGET_KEY = process.env.PRO_WIDGET_KEY ?? '';
 const WORLDMONITOR_VALID_KEY_SET = new Set(
@@ -42,6 +50,12 @@ function json(body: unknown, status: number, cors: Record<string, string>): Resp
   });
 }
 
+function isSelfHosted(): boolean {
+  return (process.env.DEPLOYMENT_MODE || '').toLowerCase() === 'self_hosted'
+    || (process.env.DEPLOYMENT_MODE || '').toLowerCase() === 'selfhosted'
+    || Boolean(process.env.SELF_HOSTED_FEATURES);
+}
+
 export default async function handler(req: Request): Promise<Response> {
   const corsHeaders = getCorsHeaders(req) as Record<string, string>;
 
@@ -59,6 +73,21 @@ export default async function handler(req: Request): Promise<Response> {
   // ── Auth ──────────────────────────────────────────────────────────────────
   let isPro = false;
 
+  // Self-hosted: allow local stacks to use widget-agent without browser-held keys.
+  // The relay is local and the handler injects server-side keys (WIDGET_AGENT_KEY / PRO_WIDGET_KEY),
+  // so requiring `wm-pro-key` in localStorage is unnecessary friction.
+  if (isSelfHosted()) {
+    isPro = false;
+    if (req.method === 'POST') {
+      try {
+        const raw = await req.clone().text();
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        isPro = parsed.tier === 'pro';
+      } catch {
+        // If body is malformed, relay will return 400; keep isPro=false.
+      }
+    }
+  } else {
   const worldMonitorKey = req.headers.get('X-WorldMonitor-Key') ?? '';
   if (hasValidWorldMonitorKey(worldMonitorKey)) {
     isPro = true;
@@ -85,6 +114,7 @@ export default async function handler(req: Request): Promise<Response> {
       }
       isPro = hasProKey;
     }
+  }
   }
 
   // Mirror the relay P2 fix: allow PRO-only deployments (no basic key, but PRO key present)
