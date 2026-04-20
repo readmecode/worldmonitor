@@ -7,6 +7,45 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function isRetryableRedisError(err: unknown): boolean {
+  const msg = errMsg(err);
+  return /ECONNRESET|socket hang up|EAI_AGAIN|ENOTFOUND|ETIMEDOUT|UND_ERR|fetch failed/i.test(msg);
+}
+
+function isRetryableHttpStatus(status: number): boolean {
+  // Upstash: 429 is rate-limit; self-host redis-rest can transiently 5xx.
+  return status === 408 || status === 429 || status >= 500;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  attempts: number,
+): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const resp = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      if (!isRetryableHttpStatus(resp.status) || i === attempts - 1) return resp;
+      // Drain body to avoid undici keeping sockets busy. Best-effort.
+      await resp.arrayBuffer().catch(() => {});
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryableRedisError(err) || i === attempts - 1) throw err;
+    }
+
+    // 60ms, 120ms (small + bounded; this is on the request path)
+    await sleep(60 * (i + 1));
+  }
+  // Unreachable, but satisfies TS.
+  throw lastErr ?? new Error('fetchWithRetry failed');
+}
+
 /**
  * Environment-based key prefix to avoid collisions when multiple deployments
  * share the same Upstash Redis instance (M-6 fix).
@@ -45,10 +84,9 @@ export async function getRawJson(key: string): Promise<unknown | null> {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) throw new Error('Redis credentials not configured');
-  const resp = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+  const resp = await fetchWithRetry(`${url}/get/${encodeURIComponent(key)}`, {
     headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(REDIS_OP_TIMEOUT_MS),
-  });
+  }, REDIS_OP_TIMEOUT_MS, 2);
   if (!resp.ok) throw new Error(`Redis HTTP ${resp.status}`);
   const data = (await resp.json()) as { result?: string };
   if (!data.result) return null;
@@ -68,10 +106,9 @@ export async function getCachedJson(key: string, raw = false): Promise<unknown |
   if (!url || !token) return null;
   try {
     const finalKey = raw ? key : prefixKey(key);
-    const resp = await fetch(`${url}/get/${encodeURIComponent(finalKey)}`, {
+    const resp = await fetchWithRetry(`${url}/get/${encodeURIComponent(finalKey)}`, {
       headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(REDIS_OP_TIMEOUT_MS),
-    });
+    }, REDIS_OP_TIMEOUT_MS, 2);
     if (!resp.ok) return null;
     const data = (await resp.json()) as { result?: string };
     if (!data.result) return null;
@@ -100,10 +137,9 @@ export async function getCachedString(key: string, raw = false): Promise<string 
   if (!url || !token) return null;
   try {
     const finalKey = raw ? key : prefixKey(key);
-    const resp = await fetch(`${url}/get/${encodeURIComponent(finalKey)}`, {
+    const resp = await fetchWithRetry(`${url}/get/${encodeURIComponent(finalKey)}`, {
       headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(REDIS_OP_TIMEOUT_MS),
-    });
+    }, REDIS_OP_TIMEOUT_MS, 2);
     if (!resp.ok) return null;
     const data = (await resp.json()) as { result?: string };
     const result = data.result ?? null;
@@ -128,11 +164,14 @@ export async function setCachedJson(key: string, value: unknown, ttlSeconds: num
   try {
     const finalKey = raw ? key : prefixKey(key);
     // Atomic SET with EX — single call avoids race between SET and EXPIRE (C-3 fix)
-    await fetch(`${url}/set/${encodeURIComponent(finalKey)}/${encodeURIComponent(JSON.stringify(value))}/EX/${ttlSeconds}`, {
+    const resp = await fetchWithRetry(`${url}/set/${encodeURIComponent(finalKey)}/${encodeURIComponent(JSON.stringify(value))}/EX/${ttlSeconds}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(REDIS_OP_TIMEOUT_MS),
-    });
+    }, REDIS_OP_TIMEOUT_MS, 3);
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      console.warn('[redis] setCachedJson failed:', `Redis HTTP ${resp.status}${text ? `: ${text.slice(0, 120)}` : ''}`);
+    }
   } catch (err) {
     console.warn('[redis] setCachedJson failed:', errMsg(err));
   }
@@ -154,12 +193,11 @@ export async function getCachedJsonBatch(keys: string[]): Promise<Map<string, un
 
   try {
     const pipeline = keys.map((k) => ['GET', prefixKey(k)]);
-    const resp = await fetch(`${url}/pipeline`, {
+    const resp = await fetchWithRetry(`${url}/pipeline`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(pipeline),
-      signal: AbortSignal.timeout(REDIS_PIPELINE_TIMEOUT_MS),
-    });
+    }, REDIS_PIPELINE_TIMEOUT_MS, 2);
     if (!resp.ok) return result;
 
     const data = (await resp.json()) as Array<{ result?: string }>;
@@ -202,12 +240,11 @@ export async function runRedisPipeline(
   if (!url || !token) return [];
 
   try {
-    const response = await fetch(`${url}/pipeline`, {
+    const response = await fetchWithRetry(`${url}/pipeline`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(commands.map((command) => normalizePipelineCommand(command, raw))),
-      signal: AbortSignal.timeout(REDIS_PIPELINE_TIMEOUT_MS),
-    });
+    }, REDIS_PIPELINE_TIMEOUT_MS, 2);
     if (!response.ok) {
       console.warn(`[redis] runRedisPipeline HTTP ${response.status}`);
       return [];
@@ -326,12 +363,11 @@ export async function geoSearchByBox(
       ['GEOSEARCH', finalKey, 'FROMLONLAT', String(lon), String(lat),
        'BYBOX', String(widthKm), String(heightKm), 'km', 'ASC', 'COUNT', String(count)],
     ];
-    const resp = await fetch(`${url}/pipeline`, {
+    const resp = await fetchWithRetry(`${url}/pipeline`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(pipeline),
-      signal: AbortSignal.timeout(REDIS_PIPELINE_TIMEOUT_MS),
-    });
+    }, REDIS_PIPELINE_TIMEOUT_MS, 2);
     if (!resp.ok) return [];
     const data = (await resp.json()) as Array<{ result?: string[] }>;
     return data[0]?.result ?? [];
@@ -352,12 +388,11 @@ export async function getHashFieldsBatch(
   try {
     const finalKey = raw ? key : prefixKey(key);
     const pipeline = [['HMGET', finalKey, ...fields]];
-    const resp = await fetch(`${url}/pipeline`, {
+    const resp = await fetchWithRetry(`${url}/pipeline`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(pipeline),
-      signal: AbortSignal.timeout(REDIS_PIPELINE_TIMEOUT_MS),
-    });
+    }, REDIS_PIPELINE_TIMEOUT_MS, 2);
     if (!resp.ok) return result;
     const data = (await resp.json()) as Array<{ result?: (string | null)[] }>;
     const values = data[0]?.result;
@@ -385,11 +420,11 @@ export async function deleteRedisKey(key: string, raw = false): Promise<void> {
 
   try {
     const finalKey = raw ? key : prefixKey(key);
-    await fetch(`${url}/del/${encodeURIComponent(finalKey)}`, {
+    const resp = await fetchWithRetry(`${url}/del/${encodeURIComponent(finalKey)}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(REDIS_OP_TIMEOUT_MS),
-    });
+    }, REDIS_OP_TIMEOUT_MS, 2);
+    if (!resp.ok) console.warn('[redis] deleteRedisKey failed:', `Redis HTTP ${resp.status}`);
   } catch (err) {
     console.warn('[redis] deleteRedisKey failed:', errMsg(err));
   }

@@ -117,6 +117,7 @@ Run:
 ```
 
 It prints container status, `GET /api/health`, and key endpoint samples in one paste-friendly output.
+It also runs a safe `.env.local` sanity check (prints key names only, never values).
 
 ### Interpreting `/api/health`
 

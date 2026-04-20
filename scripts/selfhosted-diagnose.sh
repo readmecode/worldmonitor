@@ -25,6 +25,14 @@ curl -sS -m 5 http://localhost:3000/api/health 2>&1 || true
 echo ""
 echo ""
 
+echo "== Env (sanity) =="
+if command -v node >/dev/null 2>&1; then
+  node ./scripts/selfhosted-env-check.mjs 2>&1 || true
+else
+  echo "node not found; skipping env check"
+fi
+echo ""
+
 echo "== Key Endpoints (quick) =="
 for path in \
   "/api/intelligence/v1/get-risk-scores" \
@@ -49,4 +57,3 @@ docker compose logs --tail=400 ais-relay 2>&1 | rg -n "\\[CII\\]|\\[CableHealth\
 echo ""
 
 echo "== Done =="
-
