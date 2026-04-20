@@ -163,11 +163,30 @@ export async function setCachedJson(key: string, value: unknown, ttlSeconds: num
   if (!url || !token) return;
   try {
     const finalKey = raw ? key : prefixKey(key);
+    const payload = JSON.stringify(value);
+
+    // Self-hosted redis-rest proxy: avoid encoding large JSON payloads into the URL path,
+    // which can produce 400/414 and intermittent socket resets.
+    // Upstash itself does not support this body-based format, so we only use it for the
+    // local proxy (http + redis-rest host).
+    const isLocalRedisRest = url.startsWith('http://')
+      && (url.includes('redis-rest') || url.includes('127.0.0.1') || url.includes('localhost'));
+
+    const opTimeoutMs = payload.length > 200_000 ? 8_000 : REDIS_OP_TIMEOUT_MS;
+
     // Atomic SET with EX — single call avoids race between SET and EXPIRE (C-3 fix)
-    const resp = await fetchWithRetry(`${url}/set/${encodeURIComponent(finalKey)}/${encodeURIComponent(JSON.stringify(value))}/EX/${ttlSeconds}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    }, REDIS_OP_TIMEOUT_MS, 3);
+    const resp = isLocalRedisRest
+      ? await fetchWithRetry(`${url}/`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(['SET', finalKey, payload, 'EX', String(ttlSeconds)]),
+        }, opTimeoutMs, 3)
+      : await fetchWithRetry(
+          `${url}/set/${encodeURIComponent(finalKey)}/${encodeURIComponent(payload)}/EX/${ttlSeconds}`,
+          { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
+          opTimeoutMs,
+          3,
+        );
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
       console.warn('[redis] setCachedJson failed:', `Redis HTTP ${resp.status}${text ? `: ${text.slice(0, 120)}` : ''}`);
@@ -420,10 +439,18 @@ export async function deleteRedisKey(key: string, raw = false): Promise<void> {
 
   try {
     const finalKey = raw ? key : prefixKey(key);
-    const resp = await fetchWithRetry(`${url}/del/${encodeURIComponent(finalKey)}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    }, REDIS_OP_TIMEOUT_MS, 2);
+    const isLocalRedisRest = url.startsWith('http://')
+      && (url.includes('redis-rest') || url.includes('127.0.0.1') || url.includes('localhost'));
+    const resp = isLocalRedisRest
+      ? await fetchWithRetry(`${url}/`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(['DEL', finalKey]),
+        }, REDIS_OP_TIMEOUT_MS, 2)
+      : await fetchWithRetry(`${url}/del/${encodeURIComponent(finalKey)}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }, REDIS_OP_TIMEOUT_MS, 2);
     if (!resp.ok) console.warn('[redis] deleteRedisKey failed:', `Redis HTTP ${resp.status}`);
   } catch (err) {
     console.warn('[redis] deleteRedisKey failed:', errMsg(err));
