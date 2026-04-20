@@ -33,6 +33,11 @@ services:
       LOCAL_API_MODE: "docker"
       LOCAL_API_CLOUD_FALLBACK: "false"
       WS_RELAY_URL: "http://ais-relay:3004"
+      # Local widget-agent (runs inside ais-relay). In self-hosted we inject these server-side
+      # so the browser doesn't need to store secrets in localStorage.
+      WIDGET_AGENT_RELAY_BASE: "http://ais-relay:3004"
+      WIDGET_AGENT_KEY: "${WIDGET_AGENT_KEY:-wm-widget-key}"
+      PRO_WIDGET_KEY: "${PRO_WIDGET_KEY:-wm-pro-key}"
       # Used only for privileged/refresh paths invoked by seed scripts.
       WORLDMONITOR_VALID_KEYS: "${WORLDMONITOR_VALID_KEYS:-wm-local-token}"
     # Docker secrets (recommended for API keys — keeps them out of docker inspect).
@@ -66,6 +71,9 @@ services:
       PORT: "3004"
       UPSTASH_REDIS_REST_URL: "http://redis-rest:80"
       UPSTASH_REDIS_REST_TOKEN: "${REDIS_TOKEN:-wm-local-token}"
+      # Widget agent auth keys (used by /widget-agent/* in the relay)
+      WIDGET_AGENT_KEY: "${WIDGET_AGENT_KEY:-wm-widget-key}"
+      PRO_WIDGET_KEY: "${PRO_WIDGET_KEY:-wm-pro-key}"
     depends_on:
       redis-rest:
         condition: service_healthy

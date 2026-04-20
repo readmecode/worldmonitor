@@ -94,6 +94,9 @@ export async function fetchAcledCached(opts: FetchAcledOptions): Promise<AcledRa
       }
     }
 
+    // If we couldn't obtain any auth method, degrade to an empty result for this seed cycle.
+    if (!resp) return null;
+
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
       throw new Error(`ACLED API error: ${resp.status}${text ? `: ${text.slice(0, 200)}` : ''}`);
