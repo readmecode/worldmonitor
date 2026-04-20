@@ -48,6 +48,10 @@ const exampleKeys = parseEnvKeys(envExample);
 const recommended = [
   'ACLED_EMAIL',
   'ACLED_PASSWORD',
+  // Widget agent (used by the PRO widget builder). Required for `/api/widget-agent` to return 200.
+  'ANTHROPIC_API_KEY',
+  'WIDGET_AGENT_KEY',
+  'PRO_WIDGET_KEY',
   'NASA_FIRMS_API_KEY',
   'OPENAQ_API_KEY',
   'WAQI_API_KEY',
@@ -60,6 +64,11 @@ const recommended = [
   'UCDP_ACCESS_TOKEN',
   'CLOUDFLARE_API_TOKEN',
   'PROXY_URL',
+  // Optional LLM enrichment for other features.
+  'GROQ_API_KEY',
+  'OPENROUTER_API_KEY',
+  'LLM_API_URL',
+  'LLM_API_KEY',
 ];
 
 const present = [];
@@ -82,4 +91,3 @@ console.log(`Recommended missing: ${missing.length ? missing.join(', ') : '(none
 if (unknown.length) {
   console.log(`Unknown keys (not in .env.selfhosted.example): ${unknown.sort().join(', ')}`);
 }
-
