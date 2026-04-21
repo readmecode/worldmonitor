@@ -89,6 +89,36 @@ Open:
 - App: http://localhost:3000
 - Health: http://localhost:3000/api/health
 
+### Windows (Docker Desktop + WSL2)
+
+Recommended setup is **Docker Desktop** with **WSL2 integration** enabled.
+
+1. Install Docker Desktop (Windows) and enable:
+   - Settings → General → “Use the WSL 2 based engine”
+   - Settings → Resources → WSL Integration → enable for your distro (e.g. Ubuntu)
+2. Clone the repo (either in WSL or on Windows). If you hit slow file I/O, prefer cloning inside WSL (Linux filesystem).
+
+From **PowerShell** (repo checked out on Windows):
+
+```powershell
+Copy-Item .env.selfhosted.example .env.local
+docker compose up -d --build
+```
+
+From **WSL** (repo checked out inside WSL):
+
+```bash
+cp .env.selfhosted.example .env.local
+docker compose up -d --build
+```
+
+Then open http://localhost:3000.
+
+Notes:
+
+- If you get Docker socket errors in WSL, verify Docker Desktop WSL Integration is enabled for that distro.
+- `./scripts/selfhosted-diagnose.sh` is a bash script; run it from WSL (or Git Bash).
+
 ### API Keys (Self-Hosted)
 
 Self-hosting works without any keys, but these unlock the “non-empty” experience (and reduce `EMPTY` / `STALE_SEED` in `/api/health`):
