@@ -62,6 +62,8 @@ services:
 
       # ⚔️ Conflict & Unrest
       ACLED_ACCESS_TOKEN: ""      # https://acleddata.com (free for researchers)
+      # If ACLED returns 403 permission errors for your account, disable ACLED and rely on GDELT/UCDP fallbacks:
+      DISABLE_ACLED: "1"
 
       # 🛰️ Earth Observation
       NASA_FIRMS_API_KEY: ""      # https://firms.modaps.eosdis.nasa.gov (free)

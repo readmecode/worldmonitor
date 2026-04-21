@@ -10,6 +10,18 @@ const ACLED_API_URL = 'https://acleddata.com/api/acled/read';
 const CANONICAL_KEY = 'unrest:events:v1';
 const CACHE_TTL = 16200; // 4.5h — 6x the 45 min cron interval (was 1.3x)
 
+function acledDisabled() {
+  const raw = (process.env.DISABLE_ACLED || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+function isAcledPermission403(message) {
+  const s = String(message || '').toLowerCase();
+  return s.includes('access denied')
+    || s.includes('permission is required')
+    || s.includes('consent must be accepted');
+}
+
 // ---------- ACLED Event Type Mapping (from _shared.ts) ----------
 
 function mapAcledEventType(eventType, subEventType) {
@@ -91,6 +103,11 @@ function sortBySeverityAndRecency(events) {
 // ---------- ACLED Fetch ----------
 
 async function fetchAcledProtests() {
+  if (acledDisabled()) {
+    console.log('  ACLED: disabled (DISABLE_ACLED=1), skipping');
+    return [];
+  }
+
   const token = await getAcledToken({ userAgent: CHROME_UA });
   if (!token) {
     console.log('  ACLED: no credentials configured, skipping');
@@ -120,10 +137,22 @@ async function fetchAcledProtests() {
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
+    // If the account lacks API permissions, degrade gracefully (fallback to GDELT).
+    if (resp.status === 403 && isAcledPermission403(text)) {
+      console.log('  ACLED: permission denied (403), skipping');
+      return [];
+    }
     throw new Error(`ACLED API error: ${resp.status}${text ? `: ${text.slice(0, 200)}` : ''}`);
   }
   const data = await resp.json();
-  if (data.message || data.error) throw new Error(data.message || data.error || 'ACLED API error');
+  if (data.message || data.error) {
+    const msg = data.message || data.error || 'ACLED API error';
+    if (isAcledPermission403(msg)) {
+      console.log('  ACLED: permission denied, skipping');
+      return [];
+    }
+    throw new Error(msg);
+  }
 
   const rawEvents = data.data || [];
   console.log(`  ACLED: ${rawEvents.length} raw events`);

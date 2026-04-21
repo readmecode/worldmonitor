@@ -44,10 +44,12 @@ const envExample = readFileIfExists(envExamplePath) ?? '';
 const localKeys = parseEnvKeys(envLocal);
 const exampleKeys = parseEnvKeys(envExample);
 
+const disableAcled = localKeys.has('DISABLE_ACLED');
+
 // These are the keys that most commonly drive UNHEALTHY/EMPTY signals.
 const recommended = [
-  'ACLED_EMAIL',
-  'ACLED_PASSWORD',
+  // ACLED is optional. If your account doesn't have API permissions, set DISABLE_ACLED=1.
+  ...(disableAcled ? [] : ['ACLED_EMAIL', 'ACLED_PASSWORD']),
   // Widget agent (used by the PRO widget builder). Required for `/api/widget-agent` to return 200.
   'ANTHROPIC_API_KEY',
   'WIDGET_AGENT_KEY',

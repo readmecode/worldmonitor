@@ -13,6 +13,19 @@ const ACLED_API_URL = 'https://acleddata.com/api/acled/read';
 const ACLED_CACHE_TTL = 900; // 15 min — matches ACLED rate-limit window
 const ACLED_TIMEOUT_MS = 15_000;
 
+function isDisabled(): boolean {
+  const raw = (process.env.DISABLE_ACLED || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+function isPermission403(message: string): boolean {
+  const s = message.toLowerCase();
+  // ACLED frequently returns 403 for accounts without API group permissions.
+  return s.includes('access denied')
+    || s.includes('permission is required')
+    || s.includes('consent must be accepted');
+}
+
 export interface AcledRawEvent {
   event_id_cnty?: string;
   event_type?: string;
@@ -45,6 +58,8 @@ interface FetchAcledOptions {
  * different handlers share the same cached result.
  */
 export async function fetchAcledCached(opts: FetchAcledOptions): Promise<AcledRawEvent[]> {
+  if (isDisabled()) return [];
+
   const token = await getAcledAccessToken();
   // ACLED supports cookie-based auth, but it's a fallback. If neither OAuth nor
   // credentials exist, degrade gracefully.
@@ -99,10 +114,16 @@ export async function fetchAcledCached(opts: FetchAcledOptions): Promise<AcledRa
 
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
+      // Self-hosted: treat permission-denied 403 as "ACLED unavailable" (fallback to other sources).
+      if (resp.status === 403 && text && isPermission403(text)) return null;
       throw new Error(`ACLED API error: ${resp.status}${text ? `: ${text.slice(0, 200)}` : ''}`);
     }
     const data = (await resp.json()) as { data?: AcledRawEvent[]; message?: string; error?: string };
-    if (data.message || data.error) throw new Error(data.message || data.error || 'ACLED API error');
+    if (data.message || data.error) {
+      const msg = String(data.message || data.error || 'ACLED API error');
+      if (isPermission403(msg)) return null;
+      throw new Error(msg);
+    }
 
     const events = data.data || [];
     return events.length > 0 ? events : null;

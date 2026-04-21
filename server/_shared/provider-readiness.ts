@@ -5,6 +5,11 @@ function hasSecret(key: string): boolean {
   return Boolean(process.env[key]?.trim());
 }
 
+function isAcledDisabled(): boolean {
+  const raw = (process.env.DISABLE_ACLED || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
 function hasAcledCredentials(): boolean {
   return (hasSecret('ACLED_EMAIL') && hasSecret('ACLED_PASSWORD')) || hasSecret('ACLED_ACCESS_TOKEN');
 }
@@ -18,7 +23,7 @@ export function getProviderReadiness(): Record<ProviderCapability, ProviderReadi
 
   providers.fred = fromSecret(hasSecret('FRED_API_KEY'));
   providers.eia = fromSecret(hasSecret('EIA_API_KEY'));
-  providers.acled = fromSecret(hasAcledCredentials());
+  providers.acled = isAcledDisabled() ? 'unsupported' : fromSecret(hasAcledCredentials());
   providers.ucdp = fromSecret(hasSecret('UCDP_ACCESS_TOKEN'));
   providers.finnhub = fromSecret(hasSecret('FINNHUB_API_KEY'), 'degraded');
   providers.wto = fromSecret(hasSecret('WTO_API_KEY'));

@@ -94,7 +94,7 @@ Open:
 Self-hosting works without any keys, but these unlock the “non-empty” experience (and reduce `EMPTY` / `STALE_SEED` in `/api/health`):
 
 - `ANTHROPIC_API_KEY`: **Required** for the PRO widget builder (`/api/widget-agent` → relay `/widget-agent`).
-- `ACLED_EMAIL`, `ACLED_PASSWORD`: ACLED conflict/unrest + risk score inputs. (If ACLED returns `403` even after OAuth, self-host now retries with cookie-based auth; if it still fails your account likely doesn’t have API access enabled.)
+- `ACLED_EMAIL`, `ACLED_PASSWORD`: ACLED conflict/unrest inputs. (Many accounts get `403` “permission is required”; in that case set `DISABLE_ACLED=1` to silence ACLED and rely on GDELT/UCDP fallbacks.)
 - `NASA_FIRMS_API_KEY`: Wildfires (NASA FIRMS).
 - `OPENAQ_API_KEY`: Air quality (OpenAQ v3). Optional supplement: `WAQI_API_KEY`.
 - `EIA_API_KEY`: US energy (EIA fuel prices, inventories).
